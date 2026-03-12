@@ -1,0 +1,136 @@
+# caddy-tls-permission-policy
+
+This project implements a Caddy `OnDemandPermission` module for controlling whether on-demand TLS certificate requests should be allowed. It can be used in cases where specific hostnames requiring TLS certificates being served by Caddy may not be known or configured in advance but can be defined through explicit policy rules (such as SaaS that allows customer-supplied domains). The module also implements several control mechanisms designed to prevent abuse.
+
+
+### Build Instructions
+
+The module can be built using xcaddy:
+
+```sh
+xcaddy build --with github.com/pberkel/caddy-tls-permission-policy
+```
+
+## Configuration
+
+### Caddyfile
+
+Configure the module in an on-demand TLS permission block:
+
+```caddyfile
+{
+	on_demand_tls {
+		permission policy {
+			allow_regexp ^([a-z0-9-]+)\.example\.com$
+			deny_regexp ^(blocked|secret)\.example\.com$
+			allow_subdomain www api ""
+			deny_subdomain internal private
+			resolves_to origin.example.net
+			max_domain_labels 2
+			max_certs_per_domain 20
+			permit_ip false
+			permit_local false
+			permit_all false
+		}
+	}
+}
+```
+
+Parameters `allow_regexp`, `deny_regexp`, `allow_subdomain`, `deny_subdomain`, and `resolves_to` accept multiple input values either on the same line (delimited by space characters) or in a nested block.
+
+### JSON
+
+The same configuration can be represented in JSON. This is a config snippet rather than a complete Caddy config:
+
+```json
+		"tls": {
+			"automation": {
+				"policies": [
+					{
+						"on_demand": true
+					}
+				],
+				"on_demand": {
+					"permission": {
+						"allow_regexp": [
+							"^([a-z0-9-]+)\\.example\\.com$"
+						],
+						"allow_subdomain": [
+							"www",
+							"api",
+							""
+						],
+						"deny_regexp": [
+							"^(blocked|secret)\\.example\\.com$"
+						],
+						"deny_subdomain": [
+							"internal",
+							"private"
+						],
+						"max_certs_per_domain": 20,
+						"max_domain_labels": 2,
+						"module": "policy",
+						"permit_all": false,
+						"permit_ip": false,
+						"permit_local": false,
+						"resolves_to": [
+							"origin.example.net"
+						]
+					}
+				}
+			}
+		}
+```
+
+### Parameter Descriptions
+
+- `allow_regexp`
+  Allow hostnames that match at least one regular expression.
+- `deny_regexp`
+  Deny hostnames that match any regular expression.
+- `allow_subdomain`
+  Allow hostnames whose subdomain portion exactly matches one of these string literals.
+  Use `""` to match the domain apex, for example `example.com`.
+  Values are normalized to lowercase during provisioning.
+- `deny_subdomain`
+  Deny hostnames whose subdomain portion exactly matches one of these string literals.
+  Use `""` to match the domain apex, for example `example.com`.
+  Values are normalized to lowercase during provisioning.
+- `resolves_to`
+  Require the requested name to resolve only to IPs also produced by these hostnames or IP addresses.
+- `max_domain_labels`
+  Maximum hostname label count measured from the domain upward. Default: 0 (no limit).
+  `example.com` counts as `1`, `api.example.com` counts as `2`, `api.v2.example.com` counts as `3`.
+- `max_certs_per_domain`
+  Maximum number of unique approved names per domain during the current process lifetime. Default: 0 (no limit).
+- `permit_ip`
+  Allow a certificate to be issued when name is an IP address (only useful for Caddy internal / self-signed certificates). Default: false.
+- `permit_local`
+  Allow a certificate to be issued to names that resolve to local, private, loopback, link-local, or unspecified addresses. Default: false.
+
+## Important Behavior Notes
+
+- This module is fail-closed: if a hostname does not satisfy the configured policy, it is denied.
+- The module requires at least one policy option to be configured unless `permit_all` is true. Accepted options are `allow_regexp`, `deny_regexp`, `allow_subdomain`, `deny_subdomain`, `resolves_to`, `max_domain_labels`, `max_certs_per_domain`, `permit_ip`, and `permit_local`.
+- `permit_all` bypasses all policy checks for both hostnames and direct IP names.
+- Subdomain policies compare against the portion to the left of the domain, for example:
+  `example.com` -> `""`, `www.example.com` -> `"www"`, `api.v2.example.com` -> `"api.v2"`.
+- Subdomain checks run before `allow_regexp`.
+- `max_certs_per_domain` is in-memory only. Counts reset when the process restarts.
+- `max_certs_per_domain` applies to DNS hostnames, not direct IP names.
+- Hostname approval uses exact per-name deduplication in-process, so repeated requests for the same approved name do not consume the limit again.
+- If `resolves_to` is configured, the requested name must already resolve successfully before it can be approved.
+
+## Policy Order
+
+For each requested certificate name, the module applies a policy with the following checks:
+
+- Direct IP names are denied unless `permit_ip` is enabled.
+- Direct IP names and resolved hostnames are denied if they use local, private, loopback, link-local, or unspecified IPs unless `permit_local` is enabled.
+- Hostnames whose subdomain portion matches any configured `deny_subdomain` literal are denied.
+- If `allow_subdomain` is configured, the subdomain portion must match at least one configured `allow_subdomain` literal.
+- Hostnames can be limited by maximum label count using `max_domain_labels`.
+- If `max_certs_per_domain` is configured, the module tracks unique approved hostnames in-process and limits approvals per domain.
+- Hostnames matching any configured `deny_regexp` pattern are denied.
+- If `allow_regexp` is configured, hostnames must match at least one configured `allow_regexp` pattern.
+- If `resolves_to` is configured, the resolved IPs for the requested hostname must match the IPs produced by the configured `resolves_to` targets.
