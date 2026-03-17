@@ -54,17 +54,12 @@ type PermissionByPolicy struct {
 	approvedNames map[string]map[string]struct{}                              `json:"-"`
 }
 
-// Create a new PermissionByPolicy struct with default values.
-func New() *PermissionByPolicy {
-	return &PermissionByPolicy{}
-}
-
 // CaddyModule returns the Caddy module information.
 func (*PermissionByPolicy) CaddyModule() caddy.ModuleInfo {
 	return caddy.ModuleInfo{
 		ID: "tls.permission.policy",
 		New: func() caddy.Module {
-			return New()
+			return new(PermissionByPolicy)
 		},
 	}
 }

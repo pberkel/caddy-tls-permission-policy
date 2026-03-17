@@ -404,7 +404,7 @@ func TestCertificateAllowed(t *testing.T) {
 
 func TestProvision(t *testing.T) {
 	t.Run("fails when no policy knob is configured", func(t *testing.T) {
-		policy := New()
+		policy := &PermissionByPolicy{}
 		ctx, cancel := caddy.NewContext(caddy.Context{Context: context.Background()})
 		defer cancel()
 
@@ -415,7 +415,7 @@ func TestProvision(t *testing.T) {
 	})
 
 	t.Run("allows empty policy when permit_all is true", func(t *testing.T) {
-		policy := New()
+		policy := &PermissionByPolicy{}
 		policy.PermitAll = true
 		ctx, cancel := caddy.NewContext(caddy.Context{Context: context.Background()})
 		defer cancel()
@@ -426,7 +426,7 @@ func TestProvision(t *testing.T) {
 	})
 
 	t.Run("allows config with only permit_ip enabled", func(t *testing.T) {
-		policy := New()
+		policy := &PermissionByPolicy{}
 		policy.PermitIp = true
 		ctx, cancel := caddy.NewContext(caddy.Context{Context: context.Background()})
 		defer cancel()
@@ -437,7 +437,7 @@ func TestProvision(t *testing.T) {
 	})
 
 	t.Run("allows config with only permit_local enabled", func(t *testing.T) {
-		policy := New()
+		policy := &PermissionByPolicy{}
 		policy.PermitLocal = true
 		ctx, cancel := caddy.NewContext(caddy.Context{Context: context.Background()})
 		defer cancel()
@@ -448,7 +448,7 @@ func TestProvision(t *testing.T) {
 	})
 
 	t.Run("allows config with only allow_regexp enabled", func(t *testing.T) {
-		policy := New()
+		policy := &PermissionByPolicy{}
 		policy.AllowRegexp = []string{`^.*\.example\.com$`}
 		ctx, cancel := caddy.NewContext(caddy.Context{Context: context.Background()})
 		defer cancel()
@@ -459,7 +459,7 @@ func TestProvision(t *testing.T) {
 	})
 
 	t.Run("allows config with only deny_regexp enabled", func(t *testing.T) {
-		policy := New()
+		policy := &PermissionByPolicy{}
 		policy.DenyRegexp = []string{`^blocked\.example\.com$`}
 		ctx, cancel := caddy.NewContext(caddy.Context{Context: context.Background()})
 		defer cancel()
@@ -470,7 +470,7 @@ func TestProvision(t *testing.T) {
 	})
 
 	t.Run("allows config with only allow_subdomain enabled", func(t *testing.T) {
-		policy := New()
+		policy := &PermissionByPolicy{}
 		policy.AllowSubdomain = []string{"www"}
 		ctx, cancel := caddy.NewContext(caddy.Context{Context: context.Background()})
 		defer cancel()
@@ -481,7 +481,7 @@ func TestProvision(t *testing.T) {
 	})
 
 	t.Run("allows config with only deny_subdomain enabled", func(t *testing.T) {
-		policy := New()
+		policy := &PermissionByPolicy{}
 		policy.DenySubdomain = []string{"blocked"}
 		ctx, cancel := caddy.NewContext(caddy.Context{Context: context.Background()})
 		defer cancel()
@@ -492,7 +492,7 @@ func TestProvision(t *testing.T) {
 	})
 
 	t.Run("normalizes allow_subdomain values to lowercase in provision", func(t *testing.T) {
-		policy := New()
+		policy := &PermissionByPolicy{}
 		policy.AllowSubdomain = []string{"WWW"}
 		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
 			"www.example.com": {netip.MustParseAddr("203.0.113.10")},
@@ -513,7 +513,7 @@ func TestProvision(t *testing.T) {
 	})
 
 	t.Run("normalizes deny_subdomain values to lowercase in provision", func(t *testing.T) {
-		policy := New()
+		policy := &PermissionByPolicy{}
 		policy.DenySubdomain = []string{"BLOCKED"}
 		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
 			"blocked.example.com": {netip.MustParseAddr("203.0.113.10")},
@@ -535,7 +535,7 @@ func TestProvision(t *testing.T) {
 	})
 
 	t.Run("reprovision resets derived runtime state", func(t *testing.T) {
-		policy := New()
+		policy := &PermissionByPolicy{}
 		policy.AllowRegexp = []string{`^.*\.example\.com$`}
 		policy.DenyRegexp = []string{`^blocked\.example\.com$`}
 		policy.MaxCertsPerDomain = 1
@@ -574,7 +574,7 @@ func TestProvision(t *testing.T) {
 }
 
 func TestUnmarshalCaddyfileAccumulatesRepeatedDirectives(t *testing.T) {
-	policy := New()
+	policy := &PermissionByPolicy{}
 	dispenser := caddyfile.NewTestDispenser(`
 	permission {
 		allow_regexp ^api\.example\.com$
@@ -616,7 +616,7 @@ func TestUnmarshalCaddyfileAccumulatesRepeatedDirectives(t *testing.T) {
 }
 
 func TestUnmarshalCaddyfileAllowsEmptyAllowSubdomainLiteral(t *testing.T) {
-	policy := New()
+	policy := &PermissionByPolicy{}
 	dispenser := caddyfile.NewTestDispenser(`
 	permission {
 		allow_subdomain ""
@@ -636,7 +636,7 @@ func TestUnmarshalCaddyfileAllowsEmptyAllowSubdomainLiteral(t *testing.T) {
 }
 
 func newTestPolicy() *PermissionByPolicy {
-	policy := New()
+	policy := &PermissionByPolicy{}
 	policy.logger = zap.NewNop()
 	policy.lookupNetIP = net.DefaultResolver.LookupNetIP
 	policy.approvedNames = make(map[string]map[string]struct{})
