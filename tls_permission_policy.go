@@ -56,13 +56,7 @@ type PermissionByPolicy struct {
 
 // Create a new PermissionByPolicy struct with default values.
 func New() *PermissionByPolicy {
-	p := PermissionByPolicy{
-		MaxCertsPerDomain: 0,     // No per-suffix certificate limits.
-		MaxDomainLabels:   0,     // No limit on the depth of sub-domain labels.
-		PermitIp:          false, // Do not allow certificates to be issued to IP addresses.
-		PermitLocal:       false, // Do not allow certificates to be issued to local / loopback addresses.
-	}
-	return &p
+	return &PermissionByPolicy{}
 }
 
 // CaddyModule returns the Caddy module information.
