@@ -20,7 +20,7 @@ import (
 )
 
 func init() {
-	caddy.RegisterModule(&PermissionByPolicy{})
+	caddy.RegisterModule(PermissionByPolicy{})
 }
 
 type PermissionByPolicy struct {
