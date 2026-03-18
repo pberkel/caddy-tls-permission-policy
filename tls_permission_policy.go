@@ -55,7 +55,7 @@ type PermissionByPolicy struct {
 }
 
 // CaddyModule returns the Caddy module information.
-func (*PermissionByPolicy) CaddyModule() caddy.ModuleInfo {
+func (PermissionByPolicy) CaddyModule() caddy.ModuleInfo {
 	return caddy.ModuleInfo{
 		ID: "tls.permission.policy",
 		New: func() caddy.Module {
