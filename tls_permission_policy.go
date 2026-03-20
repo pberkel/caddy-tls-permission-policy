@@ -45,13 +45,17 @@ type PermissionByPolicy struct {
 	// Allow all names without applying hostname policy checks. Default: false.
 	PermitAll bool `json:"permit_all"`
 
-	logger        *zap.Logger                                                 `json:"-"`
-	replacer      *caddy.Replacer                                             `json:"-"`
-	allowRegexp   []*regexp.Regexp                                            `json:"-"`
-	denyRegexp    []*regexp.Regexp                                            `json:"-"`
-	lookupNetIP   func(context.Context, string, string) ([]netip.Addr, error) `json:"-"`
-	approvalMu    sync.Mutex                                                  `json:"-"`
-	approvedNames map[string]map[string]struct{}                              `json:"-"`
+	logger      *zap.Logger                                                 `json:"-"`
+	replacer    *caddy.Replacer                                             `json:"-"`
+	allowRegexp []*regexp.Regexp                                            `json:"-"`
+	denyRegexp  []*regexp.Regexp                                            `json:"-"`
+	lookupNetIP func(context.Context, string, string) ([]netip.Addr, error) `json:"-"`
+	approvals   *approvalState                                              `json:"-"`
+}
+
+type approvalState struct {
+	mu            sync.Mutex
+	approvedNames map[string]map[string]struct{}
 }
 
 // CaddyModule returns the Caddy module information.
@@ -157,7 +161,9 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 	p.allowRegexp = nil
 	p.denyRegexp = nil
 	p.lookupNetIP = net.DefaultResolver.LookupNetIP
-	p.approvedNames = make(map[string]map[string]struct{})
+	p.approvals = &approvalState{
+		approvedNames: make(map[string]map[string]struct{}),
+	}
 	// Normalize input parameters
 	for i, subdomain := range p.AllowSubdomain {
 		p.AllowSubdomain[i] = strings.ToLower(subdomain)
@@ -359,11 +365,11 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 		// Before more expensive regexp and DNS-based policy evaluation. The limit is
 		// Checked again in checkCertsPerDomain() immediately before recording approval.
 		if p.MaxCertsPerDomain > 0 {
-			p.approvalMu.Lock()
-			domainApprovals := p.approvedNames[effectiveDomain]
+			p.approvals.mu.Lock()
+			domainApprovals := p.approvals.approvedNames[effectiveDomain]
 			_, alreadyApproved := domainApprovals[effectiveSubdomain]
 			approvalCount := len(domainApprovals)
-			p.approvalMu.Unlock()
+			p.approvals.mu.Unlock()
 			if c := p.logger.Check(zapcore.DebugLevel, "evaluated max_certs_per_domain pre-check"); c != nil {
 				c.Write(
 					zap.String("name", name),
@@ -506,14 +512,14 @@ func (p *PermissionByPolicy) checkResolvesTo(ctx context.Context, resolved []net
 // CheckCertsPerDomain tracks unique approved names for in-process per-domain limits.
 func (p *PermissionByPolicy) checkCertsPerDomain(effectiveDomain, effectiveSubdomain string) error {
 
-	p.approvalMu.Lock()
-	defer p.approvalMu.Unlock()
+	p.approvals.mu.Lock()
+	defer p.approvals.mu.Unlock()
 
 	// Check if effective domain has been previously stored.
-	domainApprovals, ok := p.approvedNames[effectiveDomain]
+	domainApprovals, ok := p.approvals.approvedNames[effectiveDomain]
 	if !ok {
 		domainApprovals = make(map[string]struct{})
-		p.approvedNames[effectiveDomain] = domainApprovals
+		p.approvals.approvedNames[effectiveDomain] = domainApprovals
 	}
 
 	// Check if name has previously been approved.

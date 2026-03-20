@@ -539,8 +539,11 @@ func TestProvision(t *testing.T) {
 		policy.AllowRegexp = []string{`^.*\.example\.com$`}
 		policy.DenyRegexp = []string{`^blocked\.example\.com$`}
 		policy.MaxCertsPerDomain = 1
-		policy.approvedNames = make(map[string]map[string]struct{})
-		policy.approvedNames["example.com"] = map[string]struct{}{"api": {}}
+		policy.approvals = &approvalState{
+			approvedNames: map[string]map[string]struct{}{
+				"example.com": {"api": {}},
+			},
+		}
 
 		ctx, cancel := caddy.NewContext(caddy.Context{Context: context.Background()})
 		defer cancel()
@@ -554,8 +557,8 @@ func TestProvision(t *testing.T) {
 		if len(policy.denyRegexp) != 1 {
 			t.Fatalf("expected 1 compiled deny regexp after first provision, got %d", len(policy.denyRegexp))
 		}
-		if len(policy.approvedNames) != 0 {
-			t.Fatalf("expected approval cache reset after first provision, got %d entries", len(policy.approvedNames))
+		if len(policy.approvals.approvedNames) != 0 {
+			t.Fatalf("expected approval cache reset after first provision, got %d entries", len(policy.approvals.approvedNames))
 		}
 
 		if err := policy.Provision(ctx); err != nil {
@@ -567,8 +570,8 @@ func TestProvision(t *testing.T) {
 		if len(policy.denyRegexp) != 1 {
 			t.Fatalf("expected 1 compiled deny regexp after reprovision, got %d", len(policy.denyRegexp))
 		}
-		if len(policy.approvedNames) != 0 {
-			t.Fatalf("expected approval cache reset after reprovision, got %d entries", len(policy.approvedNames))
+		if len(policy.approvals.approvedNames) != 0 {
+			t.Fatalf("expected approval cache reset after reprovision, got %d entries", len(policy.approvals.approvedNames))
 		}
 	})
 }
@@ -639,7 +642,9 @@ func newTestPolicy() *PermissionByPolicy {
 	policy := &PermissionByPolicy{}
 	policy.logger = zap.NewNop()
 	policy.lookupNetIP = net.DefaultResolver.LookupNetIP
-	policy.approvedNames = make(map[string]map[string]struct{})
+	policy.approvals = &approvalState{
+		approvedNames: make(map[string]map[string]struct{}),
+	}
 	return policy
 }
 
