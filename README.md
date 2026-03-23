@@ -24,8 +24,8 @@ Configure the module in an on-demand TLS permission block, the below example dem
 			deny_regexp ^(blocked|secret)\.example\.com$
 			allow_subdomain www api ""
 			deny_subdomain internal private
-			resolves_to origin.example.net
-			max_domain_labels 2
+			resolves_to my-caddy-server.example.net
+			max_subdomain_depth 1
 			max_certs_per_domain 20
 			permit_ip false
 			permit_local false
@@ -73,7 +73,7 @@ The same configuration can be represented in JSON. This is a config snippet rath
 							"private"
 						],
 						"max_certs_per_domain": 20,
-						"max_domain_labels": 2,
+						"max_subdomain_depth": 1,
 						"module": "policy",
 						"permit_all": false,
 						"permit_ip": false,
@@ -104,13 +104,14 @@ The same configuration can be represented in JSON. This is a config snippet rath
 - `resolves_to`
   A list of one or more hostnames or IP addresses, typically mapping to the Caddy Server that will be performing the TLS certificate request
   If the requested name does not DNS resolve to one or more of the hostnames / IP addresess provided, it will be denied.
-- `max_domain_labels`
-  Maximum DNS label count measured from the domain upward. Default: 0 (no limit).
-  `example.com` counts as `1`, `api.example.com` counts as `2`, `api.v2.example.com` counts as `3`.
-  A typical policy allowing the apex domain `example.com` and one subdomain level `(www|api|app).example.com` would set `max_domain_labels` to 2.
-  Many ACME certificate providers set an internal limit of 10 labels.
+- `max_subdomain_depth`
+  Maximum number of subdomain labels measured to the left of the domain. Default: -1 (no limit).
+  `example.com` counts as `0`, `www.example.com` counts as `1`, `api.v2.example.com` counts as `2`.
+  A typical policy allowing the apex domain `example.com` and one subdomain level `(www|api|app).example.com` would set `max_subdomain_depth` to 1.
+  NOTE: many ACME certificate providers set an internal limit of 10 subdomain labels.
 - `max_certs_per_domain`
-  Maximum number of unique approved names per domain during the current process lifetime. Default: 0 (no limit).
+  Maximum number of unique approved names per domain. Default: -1 (no limit).
+  Approval state is persisted in Caddy storage, so the limit survives restarts and is shared by multiple Caddy instances using the same storage backend.
 - `permit_ip`
   Allow a certificate to be issued when name is an IP address (only useful for Caddy internal / self-signed certificates). Default: false.
 - `permit_local`
@@ -118,15 +119,16 @@ The same configuration can be represented in JSON. This is a config snippet rath
 
 ## Important Behavior Notes
 
-- This module is fail-closed: if a hostname does not satisfy the configured policy, it is denied.
-- The module requires at least one policy option to be configured unless `permit_all` is true. Accepted options are `allow_regexp`, `deny_regexp`, `allow_subdomain`, `deny_subdomain`, `resolves_to`, `max_domain_labels`, `max_certs_per_domain`, `permit_ip`, and `permit_local`.
+- This module is fail-secure: if a hostname does not satisfy the configured policy, it is denied. Conversely, a hostname must match all configured policies to be accepted.
+- The module requires at least one policy option to be configured unless `permit_all` is true. Accepted options are `allow_regexp`, `deny_regexp`, `allow_subdomain`, `deny_subdomain`, `resolves_to`, `max_subdomain_depth`, `max_certs_per_domain`, `permit_ip`, and `permit_local`.
 - `permit_all` bypasses all policy checks for both hostnames and direct IP names.
 - Subdomain policies compare against the portion to the left of the domain, for example:
   `example.com` -> `""`, `www.example.com` -> `"www"`, `api.v2.example.com` -> `"api.v2"`.
 - Subdomain checks run before `allow_regexp`.
-- `max_certs_per_domain` is in-memory only. Counts reset when the process restarts.
+- `max_certs_per_domain` is stored in Caddy storage. Counts survive restarts and are shared across Caddy instances using the same storage backend.
 - `max_certs_per_domain` applies to DNS hostnames, not direct IP names.
-- Hostname approval uses exact per-name deduplication in-process, so repeated requests for the same approved name do not consume the limit again.
+- Hostname approval uses exact per-name deduplication per domain in storage, so repeated requests for the same approved name do not consume the limit again.
+- The module keeps a short-lived 2 minute in-memory cache of domains that have already reached `max_certs_per_domain` so obviously over-limit requests can be rechecked earlier.
 - If `resolves_to` is configured, the requested name must already resolve successfully before it can be approved.
 
 ## Policy Order
@@ -137,8 +139,8 @@ For each requested certificate name, the module applies a policy with the follow
 - Direct IP names and resolved hostnames are denied if they use local, private, loopback, link-local, or unspecified IPs unless `permit_local` is enabled.
 - Hostnames whose subdomain portion matches any configured `deny_subdomain` literal are denied.
 - If `allow_subdomain` is configured, the subdomain portion must match at least one configured `allow_subdomain` literal.
-- Hostnames with label count exceeding `max_domain_labels` are denied.
-- If `max_certs_per_domain` is configured, the module tracks unique approved hostnames in-process and limits approvals per domain.
+- Hostnames with label count exceeding `max_subdomain_depth` are denied.
+- If `max_certs_per_domain` is configured, the module checks and records unique approved hostnames in Caddy storage and limits approvals per domain.
 - Hostnames matching any configured `deny_regexp` pattern are denied.
 - If `allow_regexp` is configured, hostnames must match at least one configured `allow_regexp` pattern.
 - If `resolves_to` is configured, the resolved IPs for the requested hostname must match the IPs produced by the configured `resolves_to` targets.

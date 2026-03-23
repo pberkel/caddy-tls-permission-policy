@@ -7,16 +7,16 @@ import (
 	"net/netip"
 	"regexp"
 	"testing"
+	"time"
 
-	"github.com/caddyserver/caddy/v2"
-	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/caddy/v2/modules/caddytls"
+	"github.com/caddyserver/certmagic"
 	"go.uber.org/zap"
 )
 
 func TestCertificateAllowed(t *testing.T) {
 	t.Run("permit_all bypasses hostname policy checks", func(t *testing.T) {
-		policy := newTestPolicy()
+		policy := newTestPolicy(t)
 		policy.PermitAll = true
 
 		if err := policy.CertificateAllowed(context.Background(), "example.com"); err != nil {
@@ -25,7 +25,7 @@ func TestCertificateAllowed(t *testing.T) {
 	})
 
 	t.Run("allows regex match", func(t *testing.T) {
-		policy := newTestPolicy()
+		policy := newTestPolicy(t)
 		policy.AllowRegexp = []string{`^.*\.example\.com$`}
 		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
 		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
@@ -38,7 +38,7 @@ func TestCertificateAllowed(t *testing.T) {
 	})
 
 	t.Run("wraps hostname lookup failures as permission denied", func(t *testing.T) {
-		policy := newTestPolicy()
+		policy := newTestPolicy(t)
 		policy.AllowRegexp = []string{`^.*\.example\.com$`}
 		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
 
@@ -49,7 +49,7 @@ func TestCertificateAllowed(t *testing.T) {
 	})
 
 	t.Run("normalizes uppercase and trailing dot before regexp matching", func(t *testing.T) {
-		policy := newTestPolicy()
+		policy := newTestPolicy(t)
 		policy.AllowRegexp = []string{`^api\.example\.com$`}
 		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
 		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
@@ -62,7 +62,7 @@ func TestCertificateAllowed(t *testing.T) {
 	})
 
 	t.Run("denies empty name after normalization", func(t *testing.T) {
-		policy := newTestPolicy()
+		policy := newTestPolicy(t)
 		policy.PermitLocal = true
 
 		err := policy.CertificateAllowed(context.Background(), ".")
@@ -72,7 +72,7 @@ func TestCertificateAllowed(t *testing.T) {
 	})
 
 	t.Run("permit_all bypasses IP checks", func(t *testing.T) {
-		policy := newTestPolicy()
+		policy := newTestPolicy(t)
 		policy.PermitAll = true
 
 		if err := policy.CertificateAllowed(context.Background(), "127.0.0.1"); err != nil {
@@ -81,7 +81,7 @@ func TestCertificateAllowed(t *testing.T) {
 	})
 
 	t.Run("denies names matching deny_regexp", func(t *testing.T) {
-		policy := newTestPolicy()
+		policy := newTestPolicy(t)
 		policy.DenyRegexp = []string{`^blocked\.example\.com$`}
 		policy.denyRegexp = mustCompileRegexps(t, policy.DenyRegexp)
 		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
@@ -95,7 +95,7 @@ func TestCertificateAllowed(t *testing.T) {
 	})
 
 	t.Run("denies names matching deny_subdomain", func(t *testing.T) {
-		policy := newTestPolicy()
+		policy := newTestPolicy(t)
 		policy.DenySubdomain = []string{"blocked"}
 		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
 			"blocked.example.com": {netip.MustParseAddr("203.0.113.10")},
@@ -108,7 +108,7 @@ func TestCertificateAllowed(t *testing.T) {
 	})
 
 	t.Run("deny_subdomain takes precedence over allow_regexp", func(t *testing.T) {
-		policy := newTestPolicy()
+		policy := newTestPolicy(t)
 		policy.AllowRegexp = []string{`^.*\.example\.com$`}
 		policy.DenySubdomain = []string{"blocked"}
 		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
@@ -123,7 +123,7 @@ func TestCertificateAllowed(t *testing.T) {
 	})
 
 	t.Run("allows names matching allow_subdomain", func(t *testing.T) {
-		policy := newTestPolicy()
+		policy := newTestPolicy(t)
 		policy.AllowSubdomain = []string{"www"}
 		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
 			"www.example.com": {netip.MustParseAddr("203.0.113.10")},
@@ -135,7 +135,7 @@ func TestCertificateAllowed(t *testing.T) {
 	})
 
 	t.Run("allows apex name when allow_subdomain contains empty string", func(t *testing.T) {
-		policy := newTestPolicy()
+		policy := newTestPolicy(t)
 		policy.AllowSubdomain = []string{""}
 		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
 			"example.com": {netip.MustParseAddr("203.0.113.10")},
@@ -147,7 +147,7 @@ func TestCertificateAllowed(t *testing.T) {
 	})
 
 	t.Run("denies when allow_subdomain is configured and does not match", func(t *testing.T) {
-		policy := newTestPolicy()
+		policy := newTestPolicy(t)
 		policy.AllowSubdomain = []string{"www"}
 		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
 			"api.example.com": {netip.MustParseAddr("203.0.113.10")},
@@ -160,7 +160,7 @@ func TestCertificateAllowed(t *testing.T) {
 	})
 
 	t.Run("deny_regexp takes precedence over allow_regexp", func(t *testing.T) {
-		policy := newTestPolicy()
+		policy := newTestPolicy(t)
 		policy.AllowRegexp = []string{`^.*\.example\.com$`}
 		policy.DenyRegexp = []string{`^blocked\.example\.com$`}
 		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
@@ -176,7 +176,7 @@ func TestCertificateAllowed(t *testing.T) {
 	})
 
 	t.Run("denies when regexp policy is configured and does not match", func(t *testing.T) {
-		policy := newTestPolicy()
+		policy := newTestPolicy(t)
 		policy.AllowRegexp = []string{`^.*\.example\.com$`}
 		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
 		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
@@ -190,39 +190,39 @@ func TestCertificateAllowed(t *testing.T) {
 	})
 
 	t.Run("denies when hostname label count exceeds configured maximum", func(t *testing.T) {
-		policy := newTestPolicy()
+		policy := newTestPolicy(t)
 		policy.AllowRegexp = []string{`^.*\.example\.com$`}
 		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
-		policy.MaxDomainLabels = 2
+		policy.MaxSubdomainDepth = 2
 		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
-			"deep.api.example.com": {netip.MustParseAddr("203.0.113.10")},
+			"deep.api.v2.example.com": {netip.MustParseAddr("203.0.113.10")},
 		})
 
-		err := policy.CertificateAllowed(context.Background(), "deep.api.example.com")
+		err := policy.CertificateAllowed(context.Background(), "deep.api.v2.example.com")
 		if !errors.Is(err, caddytls.ErrPermissionDenied) {
 			t.Fatalf("expected permission denied, got %v", err)
 		}
 	})
 
 	t.Run("allows when hostname label count matches configured maximum", func(t *testing.T) {
-		policy := newTestPolicy()
+		policy := newTestPolicy(t)
 		policy.AllowRegexp = []string{`^.*\.example\.com$`}
 		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
-		policy.MaxDomainLabels = 2
+		policy.MaxSubdomainDepth = 2
 		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
-			"api.example.com": {netip.MustParseAddr("203.0.113.10")},
+			"api.v2.example.com": {netip.MustParseAddr("203.0.113.10")},
 		})
 
-		if err := policy.CertificateAllowed(context.Background(), "api.example.com"); err != nil {
+		if err := policy.CertificateAllowed(context.Background(), "api.v2.example.com"); err != nil {
 			t.Fatalf("expected allow, got %v", err)
 		}
 	})
 
-	t.Run("allows effective domain when max_domain_labels is one", func(t *testing.T) {
-		policy := newTestPolicy()
+	t.Run("allows effective domain when max_subdomain_depth is zero", func(t *testing.T) {
+		policy := newTestPolicy(t)
 		policy.AllowRegexp = []string{`^example\.com$`}
 		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
-		policy.MaxDomainLabels = 1
+		policy.MaxSubdomainDepth = 0
 		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
 			"example.com": {netip.MustParseAddr("203.0.113.10")},
 		})
@@ -233,7 +233,7 @@ func TestCertificateAllowed(t *testing.T) {
 	})
 
 	t.Run("allows configured resolves_to target", func(t *testing.T) {
-		policy := newTestPolicy()
+		policy := newTestPolicy(t)
 		policy.AllowRegexp = []string{`^.*\.example\.com$`}
 		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
 		policy.ResolvesTo = []string{"target.internal"}
@@ -248,7 +248,7 @@ func TestCertificateAllowed(t *testing.T) {
 	})
 
 	t.Run("wraps resolves_to target lookup failures as permission denied", func(t *testing.T) {
-		policy := newTestPolicy()
+		policy := newTestPolicy(t)
 		policy.AllowRegexp = []string{`^.*\.example\.com$`}
 		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
 		policy.ResolvesTo = []string{"missing.target"}
@@ -263,7 +263,7 @@ func TestCertificateAllowed(t *testing.T) {
 	})
 
 	t.Run("allows when only max_certs_per_domain is configured", func(t *testing.T) {
-		policy := newTestPolicy()
+		policy := newTestPolicy(t)
 		policy.MaxCertsPerDomain = 2
 		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
 			"api.example.com": {netip.MustParseAddr("203.0.113.10")},
@@ -279,7 +279,7 @@ func TestCertificateAllowed(t *testing.T) {
 	})
 
 	t.Run("denies regex match when any resolved address is outside resolves_to targets", func(t *testing.T) {
-		policy := newTestPolicy()
+		policy := newTestPolicy(t)
 		policy.AllowRegexp = []string{`^.*\.example\.com$`}
 		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
 		policy.ResolvesTo = []string{"target.internal"}
@@ -295,7 +295,7 @@ func TestCertificateAllowed(t *testing.T) {
 	})
 
 	t.Run("denies domain resolving to local IP when permit_local is false", func(t *testing.T) {
-		policy := newTestPolicy()
+		policy := newTestPolicy(t)
 		policy.AllowRegexp = []string{`^.*\.example\.com$`}
 		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
 		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
@@ -309,7 +309,7 @@ func TestCertificateAllowed(t *testing.T) {
 	})
 
 	t.Run("allows domain resolving to local IP when permit_local is true", func(t *testing.T) {
-		policy := newTestPolicy()
+		policy := newTestPolicy(t)
 		policy.AllowRegexp = []string{`^.*\.example\.com$`}
 		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
 		policy.PermitLocal = true
@@ -323,7 +323,7 @@ func TestCertificateAllowed(t *testing.T) {
 	})
 
 	t.Run("caps approvals per eTLD+1 bucket", func(t *testing.T) {
-		policy := newTestPolicy()
+		policy := newTestPolicy(t)
 		policy.AllowRegexp = []string{`^.*\.example\.com$`}
 		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
 		policy.MaxCertsPerDomain = 1
@@ -345,8 +345,37 @@ func TestCertificateAllowed(t *testing.T) {
 		}
 	})
 
+	t.Run("persists approval caps across policy instances sharing storage", func(t *testing.T) {
+		storagePath := t.TempDir()
+		firstPolicy := newSharedStorageTestPolicy(t, storagePath)
+		firstPolicy.AllowRegexp = []string{`^.*\.example\.com$`}
+		firstPolicy.allowRegexp = mustCompileRegexps(t, firstPolicy.AllowRegexp)
+		firstPolicy.MaxCertsPerDomain = 1
+		firstPolicy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
+			"api.example.com": {netip.MustParseAddr("203.0.113.10")},
+			"www.example.com": {netip.MustParseAddr("203.0.113.11")},
+		})
+
+		if err := firstPolicy.CertificateAllowed(context.Background(), "api.example.com"); err != nil {
+			t.Fatalf("expected first instance approval to succeed, got %v", err)
+		}
+
+		secondPolicy := newSharedStorageTestPolicy(t, storagePath)
+		secondPolicy.AllowRegexp = []string{`^.*\.example\.com$`}
+		secondPolicy.allowRegexp = mustCompileRegexps(t, secondPolicy.AllowRegexp)
+		secondPolicy.MaxCertsPerDomain = 1
+		secondPolicy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
+			"www.example.com": {netip.MustParseAddr("203.0.113.11")},
+		})
+
+		err := secondPolicy.CertificateAllowed(context.Background(), "www.example.com")
+		if !errors.Is(err, caddytls.ErrPermissionDenied) {
+			t.Fatalf("expected second instance to observe persisted limit, got %v", err)
+		}
+	})
+
 	t.Run("dedupes repeated approvals for the effective domain itself", func(t *testing.T) {
-		policy := newTestPolicy()
+		policy := newTestPolicy(t)
 		policy.AllowRegexp = []string{`^example\.com$`}
 		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
 		policy.MaxCertsPerDomain = 1
@@ -363,7 +392,7 @@ func TestCertificateAllowed(t *testing.T) {
 	})
 
 	t.Run("dedupes normalized names for max_certs_per_domain", func(t *testing.T) {
-		policy := newTestPolicy()
+		policy := newTestPolicy(t)
 		policy.AllowRegexp = []string{`^api\.example\.com$`}
 		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
 		policy.MaxCertsPerDomain = 1
@@ -379,9 +408,9 @@ func TestCertificateAllowed(t *testing.T) {
 		}
 	})
 
-	t.Run("allows when only max_domain_labels is configured and limit is satisfied", func(t *testing.T) {
-		policy := newTestPolicy()
-		policy.MaxDomainLabels = 2
+	t.Run("allows when only max_subdomain_depth is configured and limit is satisfied", func(t *testing.T) {
+		policy := newTestPolicy(t)
+		policy.MaxSubdomainDepth = 1
 		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
 			"api.example.com": {netip.MustParseAddr("203.0.113.10")},
 		})
@@ -392,7 +421,7 @@ func TestCertificateAllowed(t *testing.T) {
 	})
 
 	t.Run("allows local IP when explicitly permitted", func(t *testing.T) {
-		policy := newTestPolicy()
+		policy := newTestPolicy(t)
 		policy.PermitIp = true
 		policy.PermitLocal = true
 
@@ -402,248 +431,25 @@ func TestCertificateAllowed(t *testing.T) {
 	})
 }
 
-func TestProvision(t *testing.T) {
-	t.Run("fails when no policy knob is configured", func(t *testing.T) {
-		policy := &PermissionByPolicy{}
-		ctx, cancel := caddy.NewContext(caddy.Context{Context: context.Background()})
-		defer cancel()
+func newTestPolicy(t *testing.T) *PermissionByPolicy {
+	t.Helper()
 
-		err := policy.Provision(ctx)
-		if err == nil {
-			t.Fatal("expected provision error, got nil")
-		}
-	})
-
-	t.Run("allows empty policy when permit_all is true", func(t *testing.T) {
-		policy := &PermissionByPolicy{}
-		policy.PermitAll = true
-		ctx, cancel := caddy.NewContext(caddy.Context{Context: context.Background()})
-		defer cancel()
-
-		if err := policy.Provision(ctx); err != nil {
-			t.Fatalf("expected provision success, got %v", err)
-		}
-	})
-
-	t.Run("allows config with only permit_ip enabled", func(t *testing.T) {
-		policy := &PermissionByPolicy{}
-		policy.PermitIp = true
-		ctx, cancel := caddy.NewContext(caddy.Context{Context: context.Background()})
-		defer cancel()
-
-		if err := policy.Provision(ctx); err != nil {
-			t.Fatalf("expected provision success, got %v", err)
-		}
-	})
-
-	t.Run("allows config with only permit_local enabled", func(t *testing.T) {
-		policy := &PermissionByPolicy{}
-		policy.PermitLocal = true
-		ctx, cancel := caddy.NewContext(caddy.Context{Context: context.Background()})
-		defer cancel()
-
-		if err := policy.Provision(ctx); err != nil {
-			t.Fatalf("expected provision success, got %v", err)
-		}
-	})
-
-	t.Run("allows config with only allow_regexp enabled", func(t *testing.T) {
-		policy := &PermissionByPolicy{}
-		policy.AllowRegexp = []string{`^.*\.example\.com$`}
-		ctx, cancel := caddy.NewContext(caddy.Context{Context: context.Background()})
-		defer cancel()
-
-		if err := policy.Provision(ctx); err != nil {
-			t.Fatalf("expected provision success, got %v", err)
-		}
-	})
-
-	t.Run("allows config with only deny_regexp enabled", func(t *testing.T) {
-		policy := &PermissionByPolicy{}
-		policy.DenyRegexp = []string{`^blocked\.example\.com$`}
-		ctx, cancel := caddy.NewContext(caddy.Context{Context: context.Background()})
-		defer cancel()
-
-		if err := policy.Provision(ctx); err != nil {
-			t.Fatalf("expected provision success, got %v", err)
-		}
-	})
-
-	t.Run("allows config with only allow_subdomain enabled", func(t *testing.T) {
-		policy := &PermissionByPolicy{}
-		policy.AllowSubdomain = []string{"www"}
-		ctx, cancel := caddy.NewContext(caddy.Context{Context: context.Background()})
-		defer cancel()
-
-		if err := policy.Provision(ctx); err != nil {
-			t.Fatalf("expected provision success, got %v", err)
-		}
-	})
-
-	t.Run("allows config with only deny_subdomain enabled", func(t *testing.T) {
-		policy := &PermissionByPolicy{}
-		policy.DenySubdomain = []string{"blocked"}
-		ctx, cancel := caddy.NewContext(caddy.Context{Context: context.Background()})
-		defer cancel()
-
-		if err := policy.Provision(ctx); err != nil {
-			t.Fatalf("expected provision success, got %v", err)
-		}
-	})
-
-	t.Run("normalizes allow_subdomain values to lowercase in provision", func(t *testing.T) {
-		policy := &PermissionByPolicy{}
-		policy.AllowSubdomain = []string{"WWW"}
-		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
-			"www.example.com": {netip.MustParseAddr("203.0.113.10")},
-		})
-		ctx, cancel := caddy.NewContext(caddy.Context{Context: context.Background()})
-		defer cancel()
-
-		if err := policy.Provision(ctx); err != nil {
-			t.Fatalf("expected provision success, got %v", err)
-		}
-		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
-			"www.example.com": {netip.MustParseAddr("203.0.113.10")},
-		})
-
-		if err := policy.CertificateAllowed(context.Background(), "www.example.com"); err != nil {
-			t.Fatalf("expected allow, got %v", err)
-		}
-	})
-
-	t.Run("normalizes deny_subdomain values to lowercase in provision", func(t *testing.T) {
-		policy := &PermissionByPolicy{}
-		policy.DenySubdomain = []string{"BLOCKED"}
-		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
-			"blocked.example.com": {netip.MustParseAddr("203.0.113.10")},
-		})
-		ctx, cancel := caddy.NewContext(caddy.Context{Context: context.Background()})
-		defer cancel()
-
-		if err := policy.Provision(ctx); err != nil {
-			t.Fatalf("expected provision success, got %v", err)
-		}
-		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
-			"blocked.example.com": {netip.MustParseAddr("203.0.113.10")},
-		})
-
-		err := policy.CertificateAllowed(context.Background(), "blocked.example.com")
-		if !errors.Is(err, caddytls.ErrPermissionDenied) {
-			t.Fatalf("expected permission denied, got %v", err)
-		}
-	})
-
-	t.Run("reprovision resets derived runtime state", func(t *testing.T) {
-		policy := &PermissionByPolicy{}
-		policy.AllowRegexp = []string{`^.*\.example\.com$`}
-		policy.DenyRegexp = []string{`^blocked\.example\.com$`}
-		policy.MaxCertsPerDomain = 1
-		policy.approvals = &approvalState{
-			approvedNames: map[string]map[string]struct{}{
-				"example.com": {"api": {}},
-			},
-		}
-
-		ctx, cancel := caddy.NewContext(caddy.Context{Context: context.Background()})
-		defer cancel()
-
-		if err := policy.Provision(ctx); err != nil {
-			t.Fatalf("expected first provision success, got %v", err)
-		}
-		if len(policy.allowRegexp) != 1 {
-			t.Fatalf("expected 1 compiled allow regexp after first provision, got %d", len(policy.allowRegexp))
-		}
-		if len(policy.denyRegexp) != 1 {
-			t.Fatalf("expected 1 compiled deny regexp after first provision, got %d", len(policy.denyRegexp))
-		}
-		if len(policy.approvals.approvedNames) != 0 {
-			t.Fatalf("expected approval cache reset after first provision, got %d entries", len(policy.approvals.approvedNames))
-		}
-
-		if err := policy.Provision(ctx); err != nil {
-			t.Fatalf("expected second provision success, got %v", err)
-		}
-		if len(policy.allowRegexp) != 1 {
-			t.Fatalf("expected 1 compiled allow regexp after reprovision, got %d", len(policy.allowRegexp))
-		}
-		if len(policy.denyRegexp) != 1 {
-			t.Fatalf("expected 1 compiled deny regexp after reprovision, got %d", len(policy.denyRegexp))
-		}
-		if len(policy.approvals.approvedNames) != 0 {
-			t.Fatalf("expected approval cache reset after reprovision, got %d entries", len(policy.approvals.approvedNames))
-		}
-	})
+	return newSharedStorageTestPolicy(t, t.TempDir())
 }
 
-func TestUnmarshalCaddyfileAccumulatesRepeatedDirectives(t *testing.T) {
-	policy := &PermissionByPolicy{}
-	dispenser := caddyfile.NewTestDispenser(`
-	permission {
-		allow_regexp ^api\.example\.com$
-		allow_regexp ^www\.example\.com$
-		deny_regexp ^blocked\.example\.com$
-		deny_regexp ^forbidden\.example\.com$
-		allow_subdomain www
-		allow_subdomain ""
-		deny_subdomain blocked
-		deny_subdomain private
-			resolves_to 203.0.113.10
-			resolves_to 203.0.113.11
-			permit_all false
-		}
-		`)
+func newSharedStorageTestPolicy(t *testing.T, storagePath string) *PermissionByPolicy {
+	t.Helper()
 
-	if err := policy.UnmarshalCaddyfile(dispenser); err != nil {
-		t.Fatalf("unexpected unmarshal error: %v", err)
+	policy := &PermissionByPolicy{
+		MaxSubdomainDepth: defaultMaxSubdomainDepth,
+		MaxCertsPerDomain: defaultMaxCertsPerDomain,
 	}
-
-	if len(policy.AllowRegexp) != 2 {
-		t.Fatalf("expected 2 allow_regexp entries, got %d", len(policy.AllowRegexp))
-	}
-	if len(policy.DenyRegexp) != 2 {
-		t.Fatalf("expected 2 deny_regexp entries, got %d", len(policy.DenyRegexp))
-	}
-	if len(policy.AllowSubdomain) != 2 {
-		t.Fatalf("expected 2 allow_subdomain entries, got %d", len(policy.AllowSubdomain))
-	}
-	if len(policy.DenySubdomain) != 2 {
-		t.Fatalf("expected 2 deny_subdomain entries, got %d", len(policy.DenySubdomain))
-	}
-	if len(policy.ResolvesTo) != 2 {
-		t.Fatalf("expected 2 resolves_to entries, got %d", len(policy.ResolvesTo))
-	}
-	if policy.PermitAll {
-		t.Fatal("expected permit_all to be false")
-	}
-}
-
-func TestUnmarshalCaddyfileAllowsEmptyAllowSubdomainLiteral(t *testing.T) {
-	policy := &PermissionByPolicy{}
-	dispenser := caddyfile.NewTestDispenser(`
-	permission {
-		allow_subdomain ""
-	}
-	`)
-
-	if err := policy.UnmarshalCaddyfile(dispenser); err != nil {
-		t.Fatalf("unexpected unmarshal error: %v", err)
-	}
-
-	if len(policy.AllowSubdomain) != 1 {
-		t.Fatalf("expected 1 allow_subdomain entry, got %d", len(policy.AllowSubdomain))
-	}
-	if policy.AllowSubdomain[0] != "" {
-		t.Fatalf("expected empty allow_subdomain literal, got %q", policy.AllowSubdomain[0])
-	}
-}
-
-func newTestPolicy() *PermissionByPolicy {
-	policy := &PermissionByPolicy{}
 	policy.logger = zap.NewNop()
 	policy.lookupNetIP = net.DefaultResolver.LookupNetIP
+	policy.storage = &certmagic.FileStorage{Path: storagePath}
 	policy.approvals = &approvalState{
-		approvedNames: make(map[string]map[string]struct{}),
+		atCapacityDomains: make(map[string]time.Time),
+		now:               time.Now,
 	}
 	return policy
 }
