@@ -217,6 +217,7 @@ func TestUnmarshalCaddyfileAccumulatesRepeatedDirectives(t *testing.T) {
 		deny_subdomain private
 		resolves_to 203.0.113.10
 		resolves_to 203.0.113.11
+		nameserver 203.0.113.12:53
 		permit_all false
 	}
 	`)
@@ -239,6 +240,9 @@ func TestUnmarshalCaddyfileAccumulatesRepeatedDirectives(t *testing.T) {
 	}
 	if len(policy.ResolvesTo) != 2 {
 		t.Fatalf("expected 2 resolves_to entries, got %d", len(policy.ResolvesTo))
+	}
+	if len(policy.Nameserver) != 1 {
+		t.Fatalf("expected 1 nameserver entry, got %d", len(policy.Nameserver))
 	}
 	if policy.PermitAll {
 		t.Fatal("expected permit_all to be false")

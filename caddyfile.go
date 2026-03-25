@@ -62,6 +62,8 @@ func (p *PermissionByPolicy) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				p.DenySubdomain = append(p.DenySubdomain, configVal...)
 			case "resolves_to":
 				p.ResolvesTo = append(p.ResolvesTo, configVal...)
+			case "nameserver":
+				p.Nameserver = append(p.Nameserver, configVal...)
 			case "max_subdomain_depth":
 				if len(configVal) > 1 {
 					return d.Err("too many arguments supplied to max_subdomain_depth")
@@ -170,9 +172,12 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 		p.denyRegexp = append(p.denyRegexp, re)
 	}
 
-	// replace ResolvesTo placeholder values if present
+	// replace ResolvesTo & Nameserver placeholder values if present
 	for i, value := range p.ResolvesTo {
 		p.ResolvesTo[i] = p.replacer.ReplaceAll(value, "")
+	}
+	for i, value := range p.Nameserver {
+		p.Nameserver[i] = p.replacer.ReplaceAll(value, "")
 	}
 
 	if c := p.logger.Check(zapcore.InfoLevel, "provisioned tls.permission.policy"); c != nil {
@@ -182,6 +187,7 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 			zap.Int("allow_subdomain_count", len(p.AllowSubdomain)),
 			zap.Int("deny_subdomain_count", len(p.DenySubdomain)),
 			zap.Int("resolves_to_count", len(p.ResolvesTo)),
+			zap.Int("nameserver_count", len(p.Nameserver)),
 			zap.Int("max_subdomain_depth", p.MaxSubdomainDepth),
 			zap.Int("max_certs_per_domain", p.MaxCertsPerDomain),
 			zap.Bool("permit_ip", p.PermitIp),

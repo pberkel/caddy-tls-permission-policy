@@ -24,6 +24,7 @@ Configure the module in an on-demand TLS permission block, the below example dem
 			deny_regexp ^(blocked|secret)\.example\.com$
 			allow_subdomain www api ""
 			deny_subdomain internal private
+			nameserver 8.8.8.8:53
 			resolves_to my-caddy-server.example.net
 			max_subdomain_depth 1
 			max_certs_per_domain 20
@@ -78,6 +79,9 @@ The same configuration can be represented in JSON. This is a config snippet rath
 						"permit_all": false,
 						"permit_ip": false,
 						"permit_local": false,
+						"nameserver": [
+							"8.8.8.8:53"
+						],
 						"resolves_to": [
 							"my-caddy-server.example.net"
 						]
@@ -104,6 +108,8 @@ The same configuration can be represented in JSON. This is a config snippet rath
 - `resolves_to`
   A list of one or more hostnames or IP addresses, typically mapping to the Caddy Server that will be performing the TLS certificate request
   If the requested name does not DNS resolve to one or more of the hostnames / IP addresess provided, it will be denied.
+- `nameserver`
+  Optional name server host used to resolve DNS queries, must be in the format HOST:PORT. If not specified, the system resolver will be used.
 - `max_subdomain_depth`
   Maximum number of subdomain labels measured to the left of the domain. Default: -1 (no limit).
   `example.com` counts as `0`, `www.example.com` counts as `1`, `api.v2.example.com` counts as `2`.
