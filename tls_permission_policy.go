@@ -27,6 +27,7 @@ import (
 const defaultMaxSubdomainDepth = -1
 const defaultMaxCertsPerDomain = -1
 const approvalLimitCacheTTL = 2 * time.Minute
+const resolvedTargetsCacheTTL = 5 * time.Minute
 
 type PermissionByPolicy struct {
 	// Allow certificates for hostnames matching at least one regular expression pattern.
@@ -62,14 +63,22 @@ type PermissionByPolicy struct {
 	denyRegexp       []*regexp.Regexp                                            `json:"-"`
 	allowSubdomainSet map[string]struct{}                                        `json:"-"`
 	denySubdomainSet  map[string]struct{}                                        `json:"-"`
-	lookupNetIP func(context.Context, string, string) ([]netip.Addr, error) `json:"-"`
-	approvals   *approvalState                                              `json:"-"`
+	lookupNetIP     func(context.Context, string, string) ([]netip.Addr, error) `json:"-"`
+	approvals       *approvalState                                              `json:"-"`
+	resolvedTargets *resolvedTargetsCache                                       `json:"-"`
 }
 
 type approvalState struct {
 	mu                sync.Mutex
 	atCapacityDomains map[string]time.Time
 	now               func() time.Time
+}
+
+type resolvedTargetsCache struct {
+	mu     sync.RWMutex
+	addrs  map[netip.Addr]struct{}
+	expiry time.Time
+	now    func() time.Time
 }
 
 type storedDomainApprovals struct {

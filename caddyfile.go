@@ -133,6 +133,9 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 		atCapacityDomains: make(map[string]time.Time),
 		now:               time.Now,
 	}
+	p.resolvedTargets = &resolvedTargetsCache{
+		now: time.Now,
+	}
 
 	// Validate integer settings: -1 means "no limit"; values below -1 are not valid.
 	if p.MaxSubdomainDepth < -1 {

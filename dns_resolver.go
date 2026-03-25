@@ -132,16 +132,9 @@ func (p *PermissionByPolicy) resolveAddrsWithClient(ctx context.Context, name st
 
 // CheckResolvesTo ensures the resolved name addresses match one of the configured targets.
 func (p *PermissionByPolicy) checkResolvesTo(ctx context.Context, resolved []netip.Addr) error {
-	// AllowedTargets is a map of IP addresses extracted from "resolve_to" parameters.
-	allowedTargets := make(map[netip.Addr]struct{})
-	for _, target := range p.ResolvesTo {
-		targetAddrs, err := p.resolveAddrs(ctx, target)
-		if err != nil {
-			return fmt.Errorf("%w: resolving resolves_to target %q: %v", caddytls.ErrPermissionDenied, target, err)
-		}
-		for _, addr := range targetAddrs {
-			allowedTargets[addr.Unmap()] = struct{}{}
-		}
+	allowedTargets, err := p.allowedTargetAddrs(ctx)
+	if err != nil {
+		return err
 	}
 	if c := p.logger.Check(zapcore.DebugLevel, "evaluated resolves_to targets"); c != nil {
 		c.Write(
@@ -161,4 +154,44 @@ func (p *PermissionByPolicy) checkResolvesTo(ctx context.Context, resolved []net
 	}
 
 	return nil
+}
+
+// allowedTargetAddrs returns the cached set of allowed target IP addresses, resolving
+// all ResolvesTo targets if the cache is absent or expired.
+func (p *PermissionByPolicy) allowedTargetAddrs(ctx context.Context) (map[netip.Addr]struct{}, error) {
+	cache := p.resolvedTargets
+	now := cache.now()
+
+	// Fast path: valid cache entry.
+	cache.mu.RLock()
+	if cache.addrs != nil && now.Before(cache.expiry) {
+		addrs := cache.addrs
+		cache.mu.RUnlock()
+		return addrs, nil
+	}
+	cache.mu.RUnlock()
+
+	// Slow path: resolve all targets and refresh the cache.
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+
+	// Re-check after acquiring write lock (another goroutine may have refreshed).
+	if cache.addrs != nil && now.Before(cache.expiry) {
+		return cache.addrs, nil
+	}
+
+	addrs := make(map[netip.Addr]struct{})
+	for _, target := range p.ResolvesTo {
+		targetAddrs, err := p.resolveAddrs(ctx, target)
+		if err != nil {
+			return nil, fmt.Errorf("%w: resolving resolves_to target %q: %v", caddytls.ErrPermissionDenied, target, err)
+		}
+		for _, addr := range targetAddrs {
+			addrs[addr.Unmap()] = struct{}{}
+		}
+	}
+
+	cache.addrs = addrs
+	cache.expiry = now.Add(resolvedTargetsCacheTTL)
+	return cache.addrs, nil
 }

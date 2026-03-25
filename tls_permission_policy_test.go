@@ -371,6 +371,9 @@ func newSharedStorageTestPolicy(t *testing.T, storagePath string) *PermissionByP
 		atCapacityDomains: make(map[string]time.Time),
 		now:               time.Now,
 	}
+	policy.resolvedTargets = &resolvedTargetsCache{
+		now: time.Now,
+	}
 	return policy
 }
 
