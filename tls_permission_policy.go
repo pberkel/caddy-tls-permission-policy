@@ -55,17 +55,17 @@ type PermissionByPolicy struct {
 	// Allow all names without applying hostname policy checks. Default: false.
 	PermitAll bool `json:"permit_all"`
 
-	logger      *zap.Logger                                                 `json:"-"`
-	replacer    *caddy.Replacer                                             `json:"-"`
-	storage     certmagic.Storage                                           `json:"-"`
-	dnsClient   *miekgdns.Client                                            `json:"-"`
-	allowRegexp      []*regexp.Regexp                                            `json:"-"`
-	denyRegexp       []*regexp.Regexp                                            `json:"-"`
-	allowSubdomainSet map[string]struct{}                                        `json:"-"`
-	denySubdomainSet  map[string]struct{}                                        `json:"-"`
-	lookupNetIP     func(context.Context, string, string) ([]netip.Addr, error) `json:"-"`
-	approvals       *approvalState                                              `json:"-"`
-	resolvedTargets *resolvedTargetsCache                                       `json:"-"`
+	logger            *zap.Logger                                                 `json:"-"`
+	replacer          *caddy.Replacer                                             `json:"-"`
+	storage           certmagic.Storage                                           `json:"-"`
+	dnsClient         *miekgdns.Client                                            `json:"-"`
+	allowRegexp       []*regexp.Regexp                                            `json:"-"`
+	denyRegexp        []*regexp.Regexp                                            `json:"-"`
+	allowSubdomainSet map[string]struct{}                                         `json:"-"`
+	denySubdomainSet  map[string]struct{}                                         `json:"-"`
+	lookupNetIP       func(context.Context, string, string) ([]netip.Addr, error) `json:"-"`
+	approvals         *approvalState                                              `json:"-"`
+	resolvedTargets   *resolvedTargetsCache                                       `json:"-"`
 }
 
 type approvalState struct {
