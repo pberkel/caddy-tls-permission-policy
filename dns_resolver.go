@@ -4,12 +4,16 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+	"strings"
 
 	"github.com/caddyserver/caddy/v2/modules/caddytls"
+	miekgdns "github.com/miekg/dns"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
+
+const maxCNAMEChainDepth = 8
 
 // ResolveAddrs resolves a hostname or literal IP into one or more IP addresses.
 func (p *PermissionByPolicy) resolveAddrs(ctx context.Context, name string) ([]netip.Addr, error) {
@@ -18,6 +22,10 @@ func (p *PermissionByPolicy) resolveAddrs(ctx context.Context, name string) ([]n
 			c.Write(zap.String("name", name), zap.String("ip", addr.String()))
 		}
 		return []netip.Addr{addr}, nil
+	}
+
+	if p.dnsClient != nil {
+		return p.resolveAddrsWithClient(ctx, name)
 	}
 
 	resolved, err := p.lookupNetIP(ctx, "ip", name)
@@ -32,6 +40,89 @@ func (p *PermissionByPolicy) resolveAddrs(ctx context.Context, name string) ([]n
 	}
 
 	return resolved, nil
+}
+
+// ResolveAddrsWithClient resolves a hostname using the configured nameserver list.
+func (p *PermissionByPolicy) resolveAddrsWithClient(ctx context.Context, name string) ([]netip.Addr, error) {
+	questionName := miekgdns.Fqdn(name)
+	resolved := make(map[netip.Addr]struct{})
+	seenNames := make(map[string]struct{}, maxCNAMEChainDepth)
+	var lastErr error
+
+	for depth := 0; depth < maxCNAMEChainDepth; depth++ {
+		if _, seen := seenNames[questionName]; seen {
+			return nil, fmt.Errorf("resolving %q with configured nameserver(s): detected CNAME loop at %q", name, strings.TrimSuffix(questionName, "."))
+		}
+		seenNames[questionName] = struct{}{}
+
+		var cnameTarget string
+		resolved = make(map[netip.Addr]struct{})
+
+		for _, nameserver := range p.Nameserver {
+			for _, qtype := range []uint16{miekgdns.TypeA, miekgdns.TypeAAAA} {
+				msg := &miekgdns.Msg{}
+				msg.SetQuestion(questionName, qtype)
+
+				response, _, err := p.dnsClient.ExchangeContext(ctx, msg, nameserver)
+				if err != nil {
+					lastErr = err
+					continue
+				}
+				if response != nil && response.Rcode != miekgdns.RcodeSuccess {
+					lastErr = fmt.Errorf("dns query returned rcode %s", miekgdns.RcodeToString[response.Rcode])
+					continue
+				}
+
+				for _, answer := range response.Answer {
+					switch rr := answer.(type) {
+					case *miekgdns.A:
+						if addr, ok := netip.AddrFromSlice(rr.A); ok {
+							resolved[addr] = struct{}{}
+						}
+					case *miekgdns.AAAA:
+						if addr, ok := netip.AddrFromSlice(rr.AAAA); ok {
+							resolved[addr] = struct{}{}
+						}
+					case *miekgdns.CNAME:
+						if cnameTarget == "" {
+							cnameTarget = rr.Target
+						}
+					}
+				}
+			}
+		}
+
+		if len(resolved) > 0 {
+			break
+		}
+		if cnameTarget == "" {
+			break
+		}
+
+		questionName = miekgdns.Fqdn(cnameTarget)
+	}
+
+	if len(resolved) == 0 {
+		if lastErr != nil {
+			return nil, fmt.Errorf("resolving %q with configured nameserver(s): %w", name, lastErr)
+		}
+		return nil, fmt.Errorf("%w: domain did not resolve to any IP addresses", caddytls.ErrPermissionDenied)
+	}
+
+	addrs := make([]netip.Addr, 0, len(resolved))
+	for addr := range resolved {
+		addrs = append(addrs, addr)
+	}
+	if c := p.logger.Check(zapcore.DebugLevel, "resolved hostname addresses"); c != nil {
+		c.Write(
+			zap.String("name", name),
+			zap.Any("resolved_addrs", addrs),
+			zap.Strings("nameservers", append([]string(nil), p.Nameserver...)),
+			zap.Bool("custom_resolver", true),
+		)
+	}
+
+	return addrs, nil
 }
 
 // CheckResolvesTo ensures the resolved name addresses match one of the configured targets.

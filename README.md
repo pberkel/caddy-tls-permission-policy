@@ -109,7 +109,7 @@ The same configuration can be represented in JSON. This is a config snippet rath
   A list of one or more hostnames or IP addresses, typically mapping to the Caddy Server that will be performing the TLS certificate request
   If the requested name does not DNS resolve to one or more of the hostnames / IP addresess provided, it will be denied.
 - `nameserver`
-  Optional name server host used to resolve DNS queries, must be in the format HOST:PORT. If not specified, the system resolver will be used.
+  Optional name server hostname used to resolve DNS queries, must be in the format HOST:PORT. If not specified, the system resolver will be used.
 - `max_subdomain_depth`
   Maximum number of subdomain labels measured to the left of the domain. Default: -1 (no limit).
   `example.com` counts as `0`, `www.example.com` counts as `1`, `api.v2.example.com` counts as `2`.

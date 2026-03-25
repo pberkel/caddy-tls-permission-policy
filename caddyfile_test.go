@@ -201,6 +201,41 @@ func TestProvision(t *testing.T) {
 			t.Fatalf("expected approval cache reset after reprovision, got %d entries", len(policy.approvals.atCapacityDomains))
 		}
 	})
+
+	t.Run("fails when nameserver is not in host:port form", func(t *testing.T) {
+		policy := &PermissionByPolicy{}
+		policy.MaxSubdomainDepth = -1
+		policy.MaxCertsPerDomain = -1
+		policy.AllowRegexp = []string{`^.*\.example\.com$`}
+		policy.Nameserver = []string{"203.0.113.12"}
+		ctx, cancel := newProvisionContext(t)
+		defer cancel()
+
+		err := policy.Provision(ctx)
+		if err == nil {
+			t.Fatal("expected provision error, got nil")
+		}
+	})
+
+	t.Run("configures custom dns client timeout when nameserver is set", func(t *testing.T) {
+		policy := &PermissionByPolicy{}
+		policy.MaxSubdomainDepth = -1
+		policy.MaxCertsPerDomain = -1
+		policy.AllowRegexp = []string{`^.*\.example\.com$`}
+		policy.Nameserver = []string{"203.0.113.12:53"}
+		ctx, cancel := newProvisionContext(t)
+		defer cancel()
+
+		if err := policy.Provision(ctx); err != nil {
+			t.Fatalf("expected provision success, got %v", err)
+		}
+		if policy.dnsClient == nil {
+			t.Fatal("expected dns client to be configured")
+		}
+		if policy.dnsClient.Timeout != customDNSTimeout {
+			t.Fatalf("expected dns timeout %v, got %v", customDNSTimeout, policy.dnsClient.Timeout)
+		}
+	})
 }
 
 func TestUnmarshalCaddyfileAccumulatesRepeatedDirectives(t *testing.T) {

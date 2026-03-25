@@ -11,10 +11,13 @@ import (
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/caddy/v2/modules/caddytls"
+	miekgdns "github.com/miekg/dns"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
+
+const customDNSTimeout = 5 * time.Second
 
 func init() {
 	caddy.RegisterModule(PermissionByPolicy{})
@@ -122,6 +125,7 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 	p.logger = ctx.Logger()
 	p.replacer = caddy.NewReplacer()
 	p.storage = ctx.Storage()
+	p.dnsClient = nil
 	p.allowRegexp = nil
 	p.denyRegexp = nil
 	p.lookupNetIP = net.DefaultResolver.LookupNetIP
@@ -177,7 +181,22 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 		p.ResolvesTo[i] = p.replacer.ReplaceAll(value, "")
 	}
 	for i, value := range p.Nameserver {
-		p.Nameserver[i] = p.replacer.ReplaceAll(value, "")
+		value = p.replacer.ReplaceAll(value, "")
+		host, port, err := net.SplitHostPort(value)
+		if err != nil {
+			return fmt.Errorf("invalid nameserver %q: must be in host:port form", value)
+		}
+		if host == "" {
+			return fmt.Errorf("invalid nameserver %q: host must not be empty", value)
+		}
+		portNum, err := strconv.ParseUint(port, 10, 16)
+		if err != nil || portNum == 0 {
+			return fmt.Errorf("invalid nameserver %q: port must be a number between 1 and 65535", value)
+		}
+		p.Nameserver[i] = value
+	}
+	if len(p.Nameserver) > 0 {
+		p.dnsClient = &miekgdns.Client{Timeout: customDNSTimeout}
 	}
 
 	if c := p.logger.Check(zapcore.InfoLevel, "provisioned tls.permission.policy"); c != nil {

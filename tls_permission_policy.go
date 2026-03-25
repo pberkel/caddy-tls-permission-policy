@@ -17,6 +17,7 @@ import (
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/modules/caddytls"
 	"github.com/caddyserver/certmagic"
+	miekgdns "github.com/miekg/dns"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -38,7 +39,7 @@ type PermissionByPolicy struct {
 	DenySubdomain []string `json:"deny_subdomain,omitempty"`
 	// Allow certificates for hostnames that resolve to a specified hostname or IP address.
 	ResolvesTo []string `json:"resolves_to,omitempty"`
-	// Allow certificates for hostnames that resolve to a specified hostname or IP address.
+	//  Optional name server hostname used to resolve DNS queries, must be in the format HOST:PORT.
 	Nameserver []string `json:"nameserver,omitempty"`
 	// The maximum number of unique names approved per registrable domain. Default -1 no limit.
 	MaxCertsPerDomain int `json:"max_certs_per_domain"`
@@ -54,6 +55,7 @@ type PermissionByPolicy struct {
 	logger      *zap.Logger                                                 `json:"-"`
 	replacer    *caddy.Replacer                                             `json:"-"`
 	storage     certmagic.Storage                                           `json:"-"`
+	dnsClient   *miekgdns.Client                                            `json:"-"`
 	allowRegexp []*regexp.Regexp                                            `json:"-"`
 	denyRegexp  []*regexp.Regexp                                            `json:"-"`
 	lookupNetIP func(context.Context, string, string) ([]netip.Addr, error) `json:"-"`

@@ -3,10 +3,13 @@ package tlspermissionpolicy
 import (
 	"context"
 	"errors"
+	"net"
 	"net/netip"
 	"testing"
+	"time"
 
 	"github.com/caddyserver/caddy/v2/modules/caddytls"
+	miekgdns "github.com/miekg/dns"
 )
 
 func TestCertificateAllowedDNS(t *testing.T) {
@@ -94,6 +97,44 @@ func TestCertificateAllowedDNS(t *testing.T) {
 			t.Fatalf("expected allow, got %v", err)
 		}
 	})
+
+	t.Run("uses configured nameserver for hostname resolution", func(t *testing.T) {
+		nameserver := startTestDNSServer(t, map[string][]netip.Addr{
+			"api.example.com.": {netip.MustParseAddr("203.0.113.44")},
+		}, nil)
+
+		policy := newTestPolicy(t)
+		policy.AllowRegexp = []string{`^api\.example\.com$`}
+		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
+		policy.PermitLocal = true
+		policy.Nameserver = []string{nameserver}
+		policy.dnsClient = &miekgdns.Client{Timeout: 2 * time.Second}
+		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{})
+
+		if err := policy.CertificateAllowed(context.Background(), "api.example.com"); err != nil {
+			t.Fatalf("expected allow using nameserver-backed resolution, got %v", err)
+		}
+	})
+
+	t.Run("follows CNAME records with configured nameserver", func(t *testing.T) {
+		nameserver := startTestDNSServer(t, map[string][]netip.Addr{
+			"target.example.com.": {netip.MustParseAddr("203.0.113.55")},
+		}, map[string]string{
+			"alias.example.com.": "target.example.com.",
+		})
+
+		policy := newTestPolicy(t)
+		policy.AllowRegexp = []string{`^alias\.example\.com$`}
+		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
+		policy.PermitLocal = true
+		policy.Nameserver = []string{nameserver}
+		policy.dnsClient = &miekgdns.Client{Timeout: 2 * time.Second}
+		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{})
+
+		if err := policy.CertificateAllowed(context.Background(), "alias.example.com"); err != nil {
+			t.Fatalf("expected allow using nameserver-backed CNAME resolution, got %v", err)
+		}
+	})
 }
 
 func fakeResolver(records map[string][]netip.Addr) func(context.Context, string, string) ([]netip.Addr, error) {
@@ -103,4 +144,58 @@ func fakeResolver(records map[string][]netip.Addr) func(context.Context, string,
 		}
 		return nil, errors.New("host not found")
 	}
+}
+
+func startTestDNSServer(t *testing.T, records map[string][]netip.Addr, cnames map[string]string) string {
+	t.Helper()
+
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen udp: %v", err)
+	}
+
+	server := &miekgdns.Server{
+		PacketConn: pc,
+		Handler: miekgdns.HandlerFunc(func(w miekgdns.ResponseWriter, r *miekgdns.Msg) {
+			msg := new(miekgdns.Msg)
+			msg.SetReply(r)
+
+			for _, question := range r.Question {
+				if target, ok := cnames[question.Name]; ok {
+					msg.Answer = append(msg.Answer, &miekgdns.CNAME{
+						Hdr:    miekgdns.RR_Header{Name: question.Name, Rrtype: miekgdns.TypeCNAME, Class: miekgdns.ClassINET, Ttl: 60},
+						Target: target,
+					})
+				}
+				for _, addr := range records[question.Name] {
+					switch {
+					case question.Qtype == miekgdns.TypeA && addr.Is4():
+						msg.Answer = append(msg.Answer, &miekgdns.A{
+							Hdr: miekgdns.RR_Header{Name: question.Name, Rrtype: miekgdns.TypeA, Class: miekgdns.ClassINET, Ttl: 60},
+							A:   addr.AsSlice(),
+						})
+					case question.Qtype == miekgdns.TypeAAAA && addr.Is6():
+						msg.Answer = append(msg.Answer, &miekgdns.AAAA{
+							Hdr:  miekgdns.RR_Header{Name: question.Name, Rrtype: miekgdns.TypeAAAA, Class: miekgdns.ClassINET, Ttl: 60},
+							AAAA: addr.AsSlice(),
+						})
+					}
+				}
+			}
+
+			if err := w.WriteMsg(msg); err != nil {
+				t.Errorf("write dns response: %v", err)
+			}
+		}),
+	}
+
+	go func() {
+		_ = server.ActivateAndServe()
+	}()
+	t.Cleanup(func() {
+		_ = server.Shutdown()
+		_ = pc.Close()
+	})
+
+	return pc.LocalAddr().String()
 }
