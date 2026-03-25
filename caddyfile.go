@@ -51,7 +51,7 @@ func (p *PermissionByPolicy) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 
 			// No valid configurations where configVal slice is empty.
 			if len(configVal) == 0 {
-				return d.Errf("no value supplied for configuraton key '%s'", configKey)
+				return d.Errf("no value supplied for configuration key '%s'", configKey)
 			}
 
 			switch configKey {
@@ -93,7 +93,7 @@ func (p *PermissionByPolicy) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				if err != nil {
 					return d.Errf("invalid boolean value for permit_ip: %s", configVal[0])
 				}
-				p.PermitIp = permitIP
+				p.PermitIP = permitIP
 			case "permit_local":
 				if len(configVal) > 1 {
 					return d.Err("too many arguments supplied to permit_local")
@@ -134,6 +134,14 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 		now:               time.Now,
 	}
 
+	// Validate integer settings: -1 means "no limit"; values below -1 are not valid.
+	if p.MaxSubdomainDepth < -1 {
+		return fmt.Errorf("max_subdomain_depth must be -1 (no limit) or >= 0, got %d", p.MaxSubdomainDepth)
+	}
+	if p.MaxCertsPerDomain < -1 {
+		return fmt.Errorf("max_certs_per_domain must be -1 (no limit) or >= 0, got %d", p.MaxCertsPerDomain)
+	}
+
 	// Ensure at least one policy option is configured in the module.
 	if !p.PermitAll &&
 		len(p.AllowRegexp) == 0 &&
@@ -143,19 +151,25 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 		len(p.ResolvesTo) == 0 &&
 		p.MaxSubdomainDepth == -1 &&
 		p.MaxCertsPerDomain == -1 &&
-		!p.PermitIp &&
+		!p.PermitIP &&
 		!p.PermitLocal {
 		return fmt.Errorf("at least one policy setting must be configured unless 'permit_all' is true")
 	}
 
-	// Normalize input parameters.
+	// Normalize input parameters and build lookup sets for O(1) subdomain matching.
+	p.allowSubdomainSet = make(map[string]struct{}, len(p.AllowSubdomain))
 	for i, subdomain := range p.AllowSubdomain {
 		subdomain = p.replacer.ReplaceAll(subdomain, "")
-		p.AllowSubdomain[i] = strings.ToLower(subdomain)
+		subdomain = strings.ToLower(subdomain)
+		p.AllowSubdomain[i] = subdomain
+		p.allowSubdomainSet[subdomain] = struct{}{}
 	}
+	p.denySubdomainSet = make(map[string]struct{}, len(p.DenySubdomain))
 	for i, subdomain := range p.DenySubdomain {
 		subdomain = p.replacer.ReplaceAll(subdomain, "")
-		p.DenySubdomain[i] = strings.ToLower(subdomain)
+		subdomain = strings.ToLower(subdomain)
+		p.DenySubdomain[i] = subdomain
+		p.denySubdomainSet[subdomain] = struct{}{}
 	}
 
 	// Compile regular expressions if provided.
@@ -209,7 +223,7 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 			zap.Int("nameserver_count", len(p.Nameserver)),
 			zap.Int("max_subdomain_depth", p.MaxSubdomainDepth),
 			zap.Int("max_certs_per_domain", p.MaxCertsPerDomain),
-			zap.Bool("permit_ip", p.PermitIp),
+			zap.Bool("permit_ip", p.PermitIP),
 			zap.Bool("permit_local", p.PermitLocal),
 			zap.Bool("permit_all", p.PermitAll),
 		)

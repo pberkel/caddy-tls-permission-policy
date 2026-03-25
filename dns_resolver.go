@@ -48,6 +48,7 @@ func (p *PermissionByPolicy) resolveAddrsWithClient(ctx context.Context, name st
 	resolved := make(map[netip.Addr]struct{})
 	seenNames := make(map[string]struct{}, maxCNAMEChainDepth)
 	var lastErr error
+	var cnameTarget string
 
 	for depth := 0; depth < maxCNAMEChainDepth; depth++ {
 		if _, seen := seenNames[questionName]; seen {
@@ -55,7 +56,7 @@ func (p *PermissionByPolicy) resolveAddrsWithClient(ctx context.Context, name st
 		}
 		seenNames[questionName] = struct{}{}
 
-		var cnameTarget string
+		cnameTarget = ""
 		resolved = make(map[netip.Addr]struct{})
 
 		for _, nameserver := range p.Nameserver {
@@ -77,11 +78,11 @@ func (p *PermissionByPolicy) resolveAddrsWithClient(ctx context.Context, name st
 					switch rr := answer.(type) {
 					case *miekgdns.A:
 						if addr, ok := netip.AddrFromSlice(rr.A); ok {
-							resolved[addr] = struct{}{}
+							resolved[addr.Unmap()] = struct{}{}
 						}
 					case *miekgdns.AAAA:
 						if addr, ok := netip.AddrFromSlice(rr.AAAA); ok {
-							resolved[addr] = struct{}{}
+							resolved[addr.Unmap()] = struct{}{}
 						}
 					case *miekgdns.CNAME:
 						if cnameTarget == "" {
@@ -100,6 +101,10 @@ func (p *PermissionByPolicy) resolveAddrsWithClient(ctx context.Context, name st
 		}
 
 		questionName = miekgdns.Fqdn(cnameTarget)
+	}
+
+	if cnameTarget != "" && len(resolved) == 0 && lastErr == nil {
+		return nil, fmt.Errorf("resolving %q: CNAME chain exceeds maximum depth of %d", name, maxCNAMEChainDepth)
 	}
 
 	if len(resolved) == 0 {
@@ -135,7 +140,7 @@ func (p *PermissionByPolicy) checkResolvesTo(ctx context.Context, resolved []net
 			return fmt.Errorf("%w: resolving resolves_to target %q: %v", caddytls.ErrPermissionDenied, target, err)
 		}
 		for _, addr := range targetAddrs {
-			allowedTargets[addr] = struct{}{}
+			allowedTargets[addr.Unmap()] = struct{}{}
 		}
 	}
 	if c := p.logger.Check(zapcore.DebugLevel, "evaluated resolves_to targets"); c != nil {
@@ -143,6 +148,10 @@ func (p *PermissionByPolicy) checkResolvesTo(ctx context.Context, resolved []net
 			zap.Any("resolved_addrs", resolved),
 			zap.Any("allowed_targets", allowedTargets),
 		)
+	}
+
+	if len(resolved) == 0 {
+		return fmt.Errorf("%w: no resolved addresses to validate against resolves_to", caddytls.ErrPermissionDenied)
 	}
 
 	for _, addr := range resolved {

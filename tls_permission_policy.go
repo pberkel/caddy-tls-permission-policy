@@ -42,11 +42,13 @@ type PermissionByPolicy struct {
 	//  Optional name server hostname used to resolve DNS queries, must be in the format HOST:PORT.
 	Nameserver []string `json:"nameserver,omitempty"`
 	// The maximum number of unique names approved per registrable domain. Default -1 no limit.
-	MaxCertsPerDomain int `json:"max_certs_per_domain"`
+	MaxCertsPerDomain int `json:"max_certs_per_domain,omitempty"`
 	// The maximum subdomain depth measured to the left of the effective domain. The effective domain itself has depth 0. Default -1 no limit.
 	MaxSubdomainDepth int `json:"max_subdomain_depth,omitempty"`
-	// Allow certificates for IP address hosts. Default: false.
-	PermitIp bool `json:"permit_ip"`
+	// Allow certificates for IP address hosts. When true, IP address names bypass all other
+	// policy checks (regexp patterns, subdomain rules, domain certificate limits) and are
+	// evaluated only against the permit_local and resolves_to policies. Default: false.
+	PermitIP bool `json:"permit_ip"`
 	// Allow certificates for hostnames resolving to local, loopback, private, or unspecified addresses. Default: false.
 	PermitLocal bool `json:"permit_local"`
 	// Allow all names without applying hostname policy checks. Default: false.
@@ -56,8 +58,10 @@ type PermissionByPolicy struct {
 	replacer    *caddy.Replacer                                             `json:"-"`
 	storage     certmagic.Storage                                           `json:"-"`
 	dnsClient   *miekgdns.Client                                            `json:"-"`
-	allowRegexp []*regexp.Regexp                                            `json:"-"`
-	denyRegexp  []*regexp.Regexp                                            `json:"-"`
+	allowRegexp      []*regexp.Regexp                                            `json:"-"`
+	denyRegexp       []*regexp.Regexp                                            `json:"-"`
+	allowSubdomainSet map[string]struct{}                                        `json:"-"`
+	denySubdomainSet  map[string]struct{}                                        `json:"-"`
 	lookupNetIP func(context.Context, string, string) ([]netip.Addr, error) `json:"-"`
 	approvals   *approvalState                                              `json:"-"`
 }
@@ -84,7 +88,7 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 
 	// Check if name is actually an IP address.
 	if addr, err := netip.ParseAddr(name); err == nil {
-		if !p.PermitIp {
+		if !p.PermitIP {
 			return fmt.Errorf("%w: name is an IP address", caddytls.ErrPermissionDenied)
 		}
 		if !p.PermitLocal && isLocalIP(addr) {
@@ -97,7 +101,7 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 		}
 		// Name is an IP address and specifically allowed by configured policy.
 		// Certificates issuance will only succeed if Caddy is configured to
-		// Generate self-signed certificates using the `tls internal` option.
+		// generate self-signed certificates using the `tls internal` option.
 		return nil
 	}
 
@@ -111,12 +115,12 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 		return fmt.Errorf("%w: empty name is not allowed", caddytls.ErrPermissionDenied)
 	}
 
-	// Resolve name into IP adddress(es) for policy checks.
+	// Resolve name into IP address(es) for policy checks.
 	var resolvedName []netip.Addr
 	if !p.PermitLocal || len(p.ResolvesTo) > 0 {
 		resolved, err := p.resolveAddrs(ctx, name)
 		if err != nil {
-			return fmt.Errorf("%w: resolving name %q: %v", caddytls.ErrPermissionDenied, name, err)
+			return fmt.Errorf("%w: resolving name %q: %w", caddytls.ErrPermissionDenied, name, err)
 		}
 		resolvedName = resolved
 
@@ -135,7 +139,7 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 	// And subdomain (everything to the left of the effective domain).
 	effectiveSubdomain, effectiveDomain := "", name
 	certsPerDomainChecked := false
-	if p.MaxCertsPerDomain >= 0 || p.MaxSubdomainDepth >= 0 || len(p.DenySubdomain) > 0 || len(p.AllowSubdomain) > 0 {
+	if p.MaxCertsPerDomain >= 0 || p.MaxSubdomainDepth >= 0 || len(p.denySubdomainSet) > 0 || len(p.allowSubdomainSet) > 0 {
 		domain, err := publicsuffix.EffectiveTLDPlusOne(name)
 		if err != nil {
 			return fmt.Errorf("%w: determining effective domain for %q: %w", caddytls.ErrPermissionDenied, name, err)
@@ -190,19 +194,13 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 		}
 
 		// Deny names whose effective subdomain matches any configured deny_subdomain literal.
-		if len(p.DenySubdomain) > 0 {
-			deniedSubdomain := false
-			for _, subdomain := range p.DenySubdomain {
-				if effectiveSubdomain == subdomain {
-					deniedSubdomain = true
-					break
-				}
-			}
+		if len(p.denySubdomainSet) > 0 {
+			_, deniedSubdomain := p.denySubdomainSet[effectiveSubdomain]
 			if c := p.logger.Check(zapcore.DebugLevel, "evaluated deny_subdomain policy"); c != nil {
 				c.Write(
 					zap.String("name", name),
 					zap.String("effective_subdomain", effectiveSubdomain),
-					zap.Int("subdomain_count", len(p.DenySubdomain)),
+					zap.Int("subdomain_count", len(p.denySubdomainSet)),
 					zap.Bool("matched", deniedSubdomain),
 				)
 			}
@@ -212,19 +210,13 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 		}
 
 		// Allow names whose effective subdomain matches at least one configured allow_subdomain literal.
-		if len(p.AllowSubdomain) > 0 {
-			allowedSubdomain := false
-			for _, subdomain := range p.AllowSubdomain {
-				if effectiveSubdomain == subdomain {
-					allowedSubdomain = true
-					break
-				}
-			}
+		if len(p.allowSubdomainSet) > 0 {
+			_, allowedSubdomain := p.allowSubdomainSet[effectiveSubdomain]
 			if c := p.logger.Check(zapcore.DebugLevel, "evaluated allow_subdomain policy"); c != nil {
 				c.Write(
 					zap.String("name", name),
 					zap.String("effective_subdomain", effectiveSubdomain),
-					zap.Int("subdomain_count", len(p.AllowSubdomain)),
+					zap.Int("subdomain_count", len(p.allowSubdomainSet)),
 					zap.Bool("matched", allowedSubdomain),
 				)
 			}

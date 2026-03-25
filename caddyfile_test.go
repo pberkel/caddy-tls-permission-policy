@@ -46,7 +46,7 @@ func TestProvision(t *testing.T) {
 		policy := &PermissionByPolicy{}
 		policy.MaxSubdomainDepth = -1
 		policy.MaxCertsPerDomain = -1
-		policy.PermitIp = true
+		policy.PermitIP = true
 		ctx, cancel := newProvisionContext(t)
 		defer cancel()
 

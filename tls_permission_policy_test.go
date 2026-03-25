@@ -86,6 +86,7 @@ func TestCertificateAllowed(t *testing.T) {
 	t.Run("denies names matching deny_subdomain", func(t *testing.T) {
 		policy := newTestPolicy(t)
 		policy.DenySubdomain = []string{"blocked"}
+		policy.denySubdomainSet = buildSubdomainSet(policy.DenySubdomain)
 		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
 			"blocked.example.com": {netip.MustParseAddr("203.0.113.10")},
 		})
@@ -101,6 +102,7 @@ func TestCertificateAllowed(t *testing.T) {
 		policy.AllowRegexp = []string{`^.*\.example\.com$`}
 		policy.DenySubdomain = []string{"blocked"}
 		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
+		policy.denySubdomainSet = buildSubdomainSet(policy.DenySubdomain)
 		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
 			"blocked.example.com": {netip.MustParseAddr("203.0.113.10")},
 		})
@@ -114,6 +116,7 @@ func TestCertificateAllowed(t *testing.T) {
 	t.Run("allows names matching allow_subdomain", func(t *testing.T) {
 		policy := newTestPolicy(t)
 		policy.AllowSubdomain = []string{"www"}
+		policy.allowSubdomainSet = buildSubdomainSet(policy.AllowSubdomain)
 		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
 			"www.example.com": {netip.MustParseAddr("203.0.113.10")},
 		})
@@ -126,6 +129,7 @@ func TestCertificateAllowed(t *testing.T) {
 	t.Run("allows apex name when allow_subdomain contains empty string", func(t *testing.T) {
 		policy := newTestPolicy(t)
 		policy.AllowSubdomain = []string{""}
+		policy.allowSubdomainSet = buildSubdomainSet(policy.AllowSubdomain)
 		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
 			"example.com": {netip.MustParseAddr("203.0.113.10")},
 		})
@@ -138,6 +142,7 @@ func TestCertificateAllowed(t *testing.T) {
 	t.Run("denies when allow_subdomain is configured and does not match", func(t *testing.T) {
 		policy := newTestPolicy(t)
 		policy.AllowSubdomain = []string{"www"}
+		policy.allowSubdomainSet = buildSubdomainSet(policy.AllowSubdomain)
 		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
 			"api.example.com": {netip.MustParseAddr("203.0.113.10")},
 		})
@@ -337,7 +342,7 @@ func TestCertificateAllowed(t *testing.T) {
 
 	t.Run("allows local IP when explicitly permitted", func(t *testing.T) {
 		policy := newTestPolicy(t)
-		policy.PermitIp = true
+		policy.PermitIP = true
 		policy.PermitLocal = true
 
 		if err := policy.CertificateAllowed(context.Background(), "127.0.0.1"); err != nil {
@@ -367,6 +372,14 @@ func newSharedStorageTestPolicy(t *testing.T, storagePath string) *PermissionByP
 		now:               time.Now,
 	}
 	return policy
+}
+
+func buildSubdomainSet(subdomains []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(subdomains))
+	for _, s := range subdomains {
+		set[s] = struct{}{}
+	}
+	return set
 }
 
 func mustCompileRegexps(t *testing.T, patterns []string) []*regexp.Regexp {
