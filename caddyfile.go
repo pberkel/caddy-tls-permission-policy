@@ -144,14 +144,17 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 
 	// Normalize input parameters.
 	for i, subdomain := range p.AllowSubdomain {
+		subdomain = p.replacer.ReplaceAll(subdomain, "")
 		p.AllowSubdomain[i] = strings.ToLower(subdomain)
 	}
 	for i, subdomain := range p.DenySubdomain {
+		subdomain = p.replacer.ReplaceAll(subdomain, "")
 		p.DenySubdomain[i] = strings.ToLower(subdomain)
 	}
 
 	// Compile regular expressions if provided.
 	for _, r := range p.AllowRegexp {
+		r = p.replacer.ReplaceAll(r, "")
 		re, err := regexp.Compile(r)
 		if err != nil {
 			return fmt.Errorf("compilation of allow regexp '%s' failed: %w", r, err)
@@ -159,11 +162,17 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 		p.allowRegexp = append(p.allowRegexp, re)
 	}
 	for _, r := range p.DenyRegexp {
+		r = p.replacer.ReplaceAll(r, "")
 		re, err := regexp.Compile(r)
 		if err != nil {
 			return fmt.Errorf("compilation of deny regexp '%s' failed: %w", r, err)
 		}
 		p.denyRegexp = append(p.denyRegexp, re)
+	}
+
+	// replace ResolvesTo placeholder values if present
+	for i, value := range p.ResolvesTo {
+		p.ResolvesTo[i] = p.replacer.ReplaceAll(value, "")
 	}
 
 	if c := p.logger.Check(zapcore.InfoLevel, "provisioned tls.permission.policy"); c != nil {
