@@ -80,7 +80,7 @@ func TestWindowCounterAdvance(t *testing.T) {
 		if w.prevCount != 0 || w.currCount != 0 {
 			t.Errorf("expected both counts 0, got prev=%d curr=%d", w.prevCount, w.currCount)
 		}
-		if !w.windowStart.Equal(start.Add(2*time.Minute)) {
+		if !w.windowStart.Equal(start.Add(2 * time.Minute)) {
 			t.Errorf("expected windowStart=%v, got %v", start.Add(2*time.Minute), w.windowStart)
 		}
 	})
