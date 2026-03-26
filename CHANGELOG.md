@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [v1.2.0] - Unreleased
+## [v1.2.0] - 2026-03-27
 
 ### Fixed
 - Caddyfile-configured `rate_limit`, `per_domain_rate_limit`, `max_subdomain_depth`, and `max_certs_per_domain` values were silently lost during the Caddyfile → JSON → provision round-trip because raw string fields were tagged `json:"-"` and not serialized. This caused provision errors ("limit must be greater than 0") and silent reversion to zero values. Raw fields are now exported and JSON-visible (`limit_raw`, `duration_raw`, `max_subdomain_depth_raw`, `max_certs_per_domain_raw`) with `omitempty` so they survive serialization and take precedence at provision time.
