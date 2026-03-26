@@ -95,8 +95,10 @@ The same configuration can be represented in JSON. This is a config snippet rath
 
 - `allow_regexp`
   A list of one or more regular expressions. Hostnames that match at least one regular expression will be allowed.
+  Patterns are matched against the normalized (lowercased, trailing-dot-stripped) hostname.
 - `deny_regexp`
   A list of one or more regular expressions. Hostnames that match any regular expression will be denied.
+  Patterns are matched against the normalized (lowercased, trailing-dot-stripped) hostname.
 - `allow_subdomain`
   Allow hostnames whose subdomain portion exactly matches one of these string literals.
   Use `""` to match the domain apex, for example `example.com`.
@@ -106,10 +108,11 @@ The same configuration can be represented in JSON. This is a config snippet rath
   Use `""` to match the domain apex, for example `example.com`.
   Values are normalized to lowercase during module provisioning.
 - `resolves_to`
-  A list of one or more hostnames or IP addresses, typically mapping to the Caddy Server that will be performing the TLS certificate request
-  If the requested name does not DNS resolve to one or more of the hostnames / IP addresess provided, it will be denied.
+  A list of one or more hostnames or IP addresses, typically mapping to the Caddy server that will be performing the TLS certificate request.
+  If the requested name does not DNS resolve to one or more of the hostnames / IP addresses provided, it will be denied.
+  Resolved target IP addresses are cached in memory for 5 minutes to avoid repeated DNS lookups on every certificate request.
 - `nameserver`
-  Optional name server hostname used to resolve DNS queries, must be in the format HOST:PORT. If not specified, the system resolver will be used.
+  A list of one or more name servers used to resolve DNS queries, each must be in the format HOST:PORT. If not specified, the system resolver will be used.
 - `max_subdomain_depth`
   Maximum number of subdomain labels measured to the left of the domain. Default: -1 (no limit).
   `example.com` counts as `0`, `www.example.com` counts as `1`, `api.v2.example.com` counts as `2`.
@@ -119,9 +122,12 @@ The same configuration can be represented in JSON. This is a config snippet rath
   Maximum number of unique approved names per domain. Default: -1 (no limit).
   Approval state is persisted in Caddy storage, so the limit survives restarts and is shared by multiple Caddy instances using the same storage backend.
 - `permit_ip`
-  Allow a certificate to be issued when name is an IP address (only useful for Caddy internal / self-signed certificates). Default: false.
+  Allow a certificate to be issued when the name is a direct IP address (only useful for Caddy internal / self-signed certificates). Default: false.
+  When enabled, IP address names bypass all other policy checks (`deny_regexp`, `allow_regexp`, subdomain rules, `max_certs_per_domain`) and are evaluated only against `permit_local` and `resolves_to`.
 - `permit_local`
   Allow a certificate to be issued to names that resolve to local, private, loopback, link-local, or unspecified addresses. Default: false.
+- `permit_all`
+  Bypass all policy checks and allow every certificate request. Should never be used in production. Default: false.
 
 ## Important Behavior Notes
 
@@ -130,11 +136,11 @@ The same configuration can be represented in JSON. This is a config snippet rath
 - `permit_all` bypasses all policy checks for both hostnames and direct IP names.
 - Subdomain policies compare against the portion to the left of the domain, for example:
   `example.com` -> `""`, `www.example.com` -> `"www"`, `api.v2.example.com` -> `"api.v2"`.
-- Subdomain checks run before `allow_regexp`.
+- `max_subdomain_depth` and subdomain literal checks (`deny_subdomain`, `allow_subdomain`) run before regexp checks (`deny_regexp`, `allow_regexp`).
 - `max_certs_per_domain` is stored in Caddy storage. Counts survive restarts and are shared across Caddy instances using the same storage backend.
 - `max_certs_per_domain` applies to DNS hostnames, not direct IP names.
 - Hostname approval uses exact per-name deduplication per domain in storage, so repeated requests for the same approved name do not consume the limit again.
-- The module keeps a short-lived 2 minute in-memory cache of domains that have already reached `max_certs_per_domain` so obviously over-limit requests can be rechecked earlier.
+- The module keeps a short-lived 2-minute in-memory cache of domains that have reached `max_certs_per_domain` so that requests for already-full domains are rejected quickly without a storage read.
 - If `resolves_to` is configured, the requested name must already resolve successfully before it can be approved.
 
 ## Policy Order
@@ -143,10 +149,11 @@ For each requested certificate name, the module applies a policy with the follow
 
 - Direct IP names are denied unless `permit_ip` is enabled.
 - Direct IP names and resolved hostnames are denied if they use local, private, loopback, link-local, or unspecified IPs unless `permit_local` is enabled.
+- If `max_certs_per_domain` is configured and the domain is cached as already full, the limit is rechecked immediately (fast rejection before more expensive checks).
+- Hostnames with label count exceeding `max_subdomain_depth` are denied.
 - Hostnames whose subdomain portion matches any configured `deny_subdomain` literal are denied.
 - If `allow_subdomain` is configured, the subdomain portion must match at least one configured `allow_subdomain` literal.
-- Hostnames with label count exceeding `max_subdomain_depth` are denied.
-- If `max_certs_per_domain` is configured, the module checks and records unique approved hostnames in Caddy storage and limits approvals per domain.
 - Hostnames matching any configured `deny_regexp` pattern are denied.
 - If `allow_regexp` is configured, hostnames must match at least one configured `allow_regexp` pattern.
 - If `resolves_to` is configured, the resolved IPs for the requested hostname must match the IPs produced by the configured `resolves_to` targets.
+- If `max_certs_per_domain` is configured, the limit is authoritatively checked and the approval recorded in Caddy storage.

@@ -35,6 +35,9 @@ func (p *PermissionByPolicy) resolveAddrs(ctx context.Context, name string) ([]n
 	if len(resolved) == 0 {
 		return nil, fmt.Errorf("%w: domain did not resolve to any IP addresses", caddytls.ErrPermissionDenied)
 	}
+	for i, addr := range resolved {
+		resolved[i] = addr.Unmap()
+	}
 	if c := p.logger.Check(zapcore.DebugLevel, "resolved hostname addresses"); c != nil {
 		c.Write(zap.String("name", name), zap.Any("resolved_addrs", resolved))
 	}
@@ -160,26 +163,28 @@ func (p *PermissionByPolicy) checkResolvesTo(ctx context.Context, resolved []net
 // all ResolvesTo targets if the cache is absent or expired.
 func (p *PermissionByPolicy) allowedTargetAddrs(ctx context.Context) (map[netip.Addr]struct{}, error) {
 	cache := p.resolvedTargets
-	now := cache.now()
 
 	// Fast path: valid cache entry.
 	cache.mu.RLock()
-	if cache.addrs != nil && now.Before(cache.expiry) {
+	if cache.addrs != nil && cache.now().Before(cache.expiry) {
 		addrs := cache.addrs
 		cache.mu.RUnlock()
 		return addrs, nil
 	}
 	cache.mu.RUnlock()
 
-	// Slow path: resolve all targets and refresh the cache.
+	// Double-check under write lock before committing to resolution.
 	cache.mu.Lock()
-	defer cache.mu.Unlock()
-
-	// Re-check after acquiring write lock (another goroutine may have refreshed).
-	if cache.addrs != nil && now.Before(cache.expiry) {
-		return cache.addrs, nil
+	if cache.addrs != nil && cache.now().Before(cache.expiry) {
+		addrs := cache.addrs
+		cache.mu.Unlock()
+		return addrs, nil
 	}
+	cache.mu.Unlock()
 
+	// Resolve all targets outside the lock so readers are not blocked during DNS I/O.
+	// Multiple goroutines may resolve concurrently after a cache miss; this is safe
+	// since the final update is guarded and DNS results for stable targets are identical.
 	addrs := make(map[netip.Addr]struct{})
 	for _, target := range p.ResolvesTo {
 		targetAddrs, err := p.resolveAddrs(ctx, target)
@@ -191,7 +196,13 @@ func (p *PermissionByPolicy) allowedTargetAddrs(ctx context.Context) (map[netip.
 		}
 	}
 
-	cache.addrs = addrs
-	cache.expiry = now.Add(resolvedTargetsCacheTTL)
+	// Store result under write lock, but only if the cache is still stale — another
+	// goroutine may have completed resolution and written a fresh entry while we were resolving.
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	if cache.addrs == nil || !cache.now().Before(cache.expiry) {
+		cache.addrs = addrs
+		cache.expiry = cache.now().Add(resolvedTargetsCacheTTL)
+	}
 	return cache.addrs, nil
 }

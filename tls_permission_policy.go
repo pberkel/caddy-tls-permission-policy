@@ -160,7 +160,7 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 
 		// Perform an early limit check so requests that are already over the cap can fail
 		// Before more expensive regexp and DNS-based policy evaluation. The limit is
-		// Checked again in checkCertsPerDomain() immediately before recording approval.
+		// checked again in checkCertsPerDomain() immediately before recording approval.
 		if p.MaxCertsPerDomain >= 0 {
 			cachedFull := p.checkCachedCertsPerDomainLimit(effectiveDomain)
 			if c := p.logger.Check(zapcore.DebugLevel, "evaluated max_certs_per_domain pre-check"); c != nil {

@@ -1,0 +1,85 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [v1.1.0] - 2026-03-26
+
+### Added
+- `nameserver` configuration option to specify one or more custom DNS servers (HOST:PORT) for resolving hostnames, instead of the system resolver.
+- Custom DNS resolver with parallel A and AAAA record queries, CNAME chain following (up to 8 hops), and loop detection.
+- Caddy [placeholder](https://caddyserver.com/docs/conventions#placeholders) support for `allow_subdomain`, `deny_subdomain`, `resolves_to`, and `nameserver` configuration values.
+- Validation of `max_subdomain_depth` and `max_certs_per_domain`: values below -1 are now rejected at provisioning time with a descriptive error.
+- 5-minute TTL in-memory cache for resolved `resolves_to` target IP addresses, avoiding repeated DNS lookups on every certificate request.
+
+### Changed
+- Extracted Caddyfile parsing and module provisioning into a dedicated `caddyfile.go` file.
+- `allow_subdomain` and `deny_subdomain` now use O(1) map lookups (built at provisioning time) instead of linear slice iteration.
+- Renamed `PermitIp` field to `PermitIP` to follow Go initialism naming conventions.
+- Added `omitempty` to the `max_certs_per_domain` JSON tag, consistent with `max_subdomain_depth`.
+- Write lock in `resolves_to` target cache refresh is no longer held during DNS I/O, preventing concurrent readers from blocking for the full DNS timeout duration.
+- Updated README with corrected policy evaluation order, documented `resolves_to` caching behaviour, added missing `permit_all` option entry, and various corrections and clarifications.
+
+### Fixed
+- IPv4-in-IPv6 addresses (e.g. `::ffff:1.2.3.4`) returned by DNS resolvers are now normalised via `.Unmap()` in all resolution paths, preventing false denials in `resolves_to` comparisons.
+- Empty resolved address slice no longer vacuously passes the `resolves_to` check.
+- Resolution errors no longer double-wrap `ErrPermissionDenied` in the error message string.
+- Exceeding the CNAME chain depth limit now returns a clear "CNAME chain exceeds maximum depth" error instead of the misleading "domain did not resolve to any IP addresses".
+
+---
+
+## [v1.0.5] - 2026-03-20
+
+### Changed
+- Refactored approval state locking: `sync.Mutex` moved into a dedicated `approvalState` struct for clearer ownership and easier testing.
+
+---
+
+## [v1.0.4] - 2026-03-19
+
+### Fixed
+- Fixed incorrect `caddy.RegisterModule()` call.
+- Fixed failing unit tests.
+
+---
+
+## [v1.0.3] - 2026-03-18
+
+### Changed
+- Updated and tidied Go module dependencies (`go mod tidy`).
+
+---
+
+## [v1.0.2] - 2026-03-17
+
+### Fixed
+- Fixed module initialization.
+
+---
+
+## [v1.0.1] - 2026-03-17
+
+### Fixed
+- Fixed struct initialization.
+
+---
+
+## [v1.0.0] - 2026-03-17
+
+### Added
+- Initial release.
+- Core policy engine implementing the Caddy `OnDemandPermission` interface.
+- `allow_regexp` and `deny_regexp` for hostname matching via regular expressions.
+- `allow_subdomain` and `deny_subdomain` for exact subdomain literal matching.
+- `resolves_to` for validating that a hostname resolves to a specific target.
+- `max_subdomain_depth` to limit the number of subdomain labels.
+- `max_certs_per_domain` to cap unique approved names per registrable domain, with approval state persisted in Caddy storage and shared across instances.
+- `permit_ip` to allow direct IP address certificate requests.
+- `permit_local` to allow hostnames resolving to local/private/loopback addresses.
+- `permit_all` to bypass all policy checks.
+- Fail-secure design: hostnames denied by default, must satisfy all configured policies.
+- Short-lived 2-minute in-memory cache for at-capacity domains to avoid repeated storage reads.
+- Caddyfile and JSON configuration support.
+- GitHub Actions CI workflow.
