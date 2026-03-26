@@ -71,20 +71,12 @@ func (p *PermissionByPolicy) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				if len(configVal) > 1 {
 					return d.Err("too many arguments supplied to max_subdomain_depth")
 				}
-				maxSubdomainDepth, err := strconv.Atoi(configVal[0])
-				if err != nil {
-					return d.Errf("invalid integer value for max_subdomain_depth: %s", configVal[0])
-				}
-				p.MaxSubdomainDepth = maxSubdomainDepth
+				p.maxSubdomainDepthRaw = configVal[0]
 			case "max_certs_per_domain":
 				if len(configVal) > 1 {
 					return d.Err("too many arguments supplied to max_certs_per_domain")
 				}
-				maxCertsPerDomain, err := strconv.Atoi(configVal[0])
-				if err != nil {
-					return d.Errf("invalid integer value for max_certs_per_domain: %s", configVal[0])
-				}
-				p.MaxCertsPerDomain = maxCertsPerDomain
+				p.maxCertsPerDomainRaw = configVal[0]
 			case "permit_ip":
 				if len(configVal) > 1 {
 					return d.Err("too many arguments supplied to permit_ip")
@@ -145,6 +137,25 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 	}
 	p.resolvedTargets = &resolvedTargetsCache{
 		now: time.Now,
+	}
+
+	// Replace placeholders in max_subdomain_depth and max_certs_per_domain raw values (set
+	// during Caddyfile parsing) and parse them into the concrete fields used at runtime.
+	if p.maxSubdomainDepthRaw != "" {
+		raw := p.replacer.ReplaceAll(p.maxSubdomainDepthRaw, "")
+		val, err := strconv.Atoi(raw)
+		if err != nil {
+			return fmt.Errorf("invalid integer value for max_subdomain_depth: %s", raw)
+		}
+		p.MaxSubdomainDepth = val
+	}
+	if p.maxCertsPerDomainRaw != "" {
+		raw := p.replacer.ReplaceAll(p.maxCertsPerDomainRaw, "")
+		val, err := strconv.Atoi(raw)
+		if err != nil {
+			return fmt.Errorf("invalid integer value for max_certs_per_domain: %s", raw)
+		}
+		p.MaxCertsPerDomain = val
 	}
 
 	// Validate integer settings: -1 means "no limit"; values below -1 are not valid.

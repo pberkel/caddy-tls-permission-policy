@@ -380,6 +380,77 @@ func TestProvisionReplacesRateLimitPlaceholders(t *testing.T) {
 	}
 }
 
+func TestUnmarshalCaddyfileMaxCertsPerDomainStoresRawValue(t *testing.T) {
+	policy := &PermissionByPolicy{}
+	dispenser := caddyfile.NewTestDispenser(`
+	permission {
+		max_certs_per_domain 50
+	}
+	`)
+
+	if err := policy.UnmarshalCaddyfile(dispenser); err != nil {
+		t.Fatalf("unexpected unmarshal error: %v", err)
+	}
+
+	if policy.maxCertsPerDomainRaw != "50" {
+		t.Errorf("expected maxCertsPerDomainRaw=%q, got %q", "50", policy.maxCertsPerDomainRaw)
+	}
+	// MaxCertsPerDomain should not be parsed until Provision resolves the raw value.
+	if policy.MaxCertsPerDomain != 0 {
+		t.Errorf("expected MaxCertsPerDomain to remain zero, got %d", policy.MaxCertsPerDomain)
+	}
+}
+
+func TestUnmarshalCaddyfileMaxCertsPerDomainStoresPlaceholderValue(t *testing.T) {
+	policy := &PermissionByPolicy{}
+	dispenser := caddyfile.NewTestDispenser(`
+	permission {
+		max_certs_per_domain {env.MAX_CERTS}
+	}
+	`)
+
+	if err := policy.UnmarshalCaddyfile(dispenser); err != nil {
+		t.Fatalf("unexpected unmarshal error: %v", err)
+	}
+
+	if policy.maxCertsPerDomainRaw != "{env.MAX_CERTS}" {
+		t.Errorf("expected raw placeholder to be stored, got %q", policy.maxCertsPerDomainRaw)
+	}
+}
+
+func TestProvisionReplacesMaxCertsPerDomainPlaceholder(t *testing.T) {
+	t.Setenv("TEST_MAX_CERTS", "25")
+
+	policy := &PermissionByPolicy{}
+	policy.MaxSubdomainDepth = -1
+	policy.maxCertsPerDomainRaw = "{env.TEST_MAX_CERTS}"
+
+	ctx, cancel := newProvisionContext(t)
+	defer cancel()
+
+	if err := policy.Provision(ctx); err != nil {
+		t.Fatalf("expected provision success, got %v", err)
+	}
+	if policy.MaxCertsPerDomain != 25 {
+		t.Errorf("expected MaxCertsPerDomain=25, got %d", policy.MaxCertsPerDomain)
+	}
+}
+
+func TestProvisionFailsOnInvalidMaxCertsPerDomainPlaceholderValue(t *testing.T) {
+	t.Setenv("TEST_BAD_MAX_CERTS", "notanint")
+
+	policy := &PermissionByPolicy{}
+	policy.MaxSubdomainDepth = -1
+	policy.maxCertsPerDomainRaw = "{env.TEST_BAD_MAX_CERTS}"
+
+	ctx, cancel := newProvisionContext(t)
+	defer cancel()
+
+	if err := policy.Provision(ctx); err == nil {
+		t.Fatal("expected provision error for invalid max_certs_per_domain, got nil")
+	}
+}
+
 func TestProvisionFailsOnInvalidRateLimitPlaceholderValues(t *testing.T) {
 	t.Run("invalid limit after replacement", func(t *testing.T) {
 		t.Setenv("TEST_BAD_LIMIT", "notanint")
@@ -437,6 +508,77 @@ func TestUnmarshalCaddyfileAllowsEmptyAllowSubdomainLiteral(t *testing.T) {
 	}
 	if policy.AllowSubdomain[0] != "" {
 		t.Fatalf("expected empty allow_subdomain literal, got %q", policy.AllowSubdomain[0])
+	}
+}
+
+func TestUnmarshalCaddyfileMaxSubdomainDepthStoresRawValue(t *testing.T) {
+	policy := &PermissionByPolicy{}
+	dispenser := caddyfile.NewTestDispenser(`
+	permission {
+		max_subdomain_depth 3
+	}
+	`)
+
+	if err := policy.UnmarshalCaddyfile(dispenser); err != nil {
+		t.Fatalf("unexpected unmarshal error: %v", err)
+	}
+
+	if policy.maxSubdomainDepthRaw != "3" {
+		t.Errorf("expected maxSubdomainDepthRaw=%q, got %q", "3", policy.maxSubdomainDepthRaw)
+	}
+	// MaxSubdomainDepth should not be parsed until Provision resolves the raw value.
+	if policy.MaxSubdomainDepth != 0 {
+		t.Errorf("expected MaxSubdomainDepth to remain zero, got %d", policy.MaxSubdomainDepth)
+	}
+}
+
+func TestUnmarshalCaddyfileMaxSubdomainDepthStoresPlaceholderValue(t *testing.T) {
+	policy := &PermissionByPolicy{}
+	dispenser := caddyfile.NewTestDispenser(`
+	permission {
+		max_subdomain_depth {env.MAX_DEPTH}
+	}
+	`)
+
+	if err := policy.UnmarshalCaddyfile(dispenser); err != nil {
+		t.Fatalf("unexpected unmarshal error: %v", err)
+	}
+
+	if policy.maxSubdomainDepthRaw != "{env.MAX_DEPTH}" {
+		t.Errorf("expected raw placeholder to be stored, got %q", policy.maxSubdomainDepthRaw)
+	}
+}
+
+func TestProvisionReplacesMaxSubdomainDepthPlaceholder(t *testing.T) {
+	t.Setenv("TEST_MAX_DEPTH", "2")
+
+	policy := &PermissionByPolicy{}
+	policy.MaxCertsPerDomain = -1
+	policy.maxSubdomainDepthRaw = "{env.TEST_MAX_DEPTH}"
+
+	ctx, cancel := newProvisionContext(t)
+	defer cancel()
+
+	if err := policy.Provision(ctx); err != nil {
+		t.Fatalf("expected provision success, got %v", err)
+	}
+	if policy.MaxSubdomainDepth != 2 {
+		t.Errorf("expected MaxSubdomainDepth=2, got %d", policy.MaxSubdomainDepth)
+	}
+}
+
+func TestProvisionFailsOnInvalidMaxSubdomainDepthPlaceholderValue(t *testing.T) {
+	t.Setenv("TEST_BAD_MAX_DEPTH", "notanint")
+
+	policy := &PermissionByPolicy{}
+	policy.MaxCertsPerDomain = -1
+	policy.maxSubdomainDepthRaw = "{env.TEST_BAD_MAX_DEPTH}"
+
+	ctx, cancel := newProvisionContext(t)
+	defer cancel()
+
+	if err := policy.Provision(ctx); err == nil {
+		t.Fatal("expected provision error for invalid max_subdomain_depth, got nil")
 	}
 }
 

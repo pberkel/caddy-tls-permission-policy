@@ -127,10 +127,12 @@ The same configuration can be represented in JSON. This is a config snippet rath
   Maximum number of subdomain labels measured to the left of the domain. Default: -1 (no limit).
   `example.com` counts as `0`, `www.example.com` counts as `1`, `api.v2.example.com` counts as `2`.
   A typical policy allowing the apex domain `example.com` and one subdomain level `(www|api|app).example.com` would set `max_subdomain_depth` to 1.
+  Accepts a Caddy [placeholder](https://caddyserver.com/docs/conventions#placeholders) value (e.g. `{env.MAX_SUBDOMAIN_DEPTH}`), resolved at provisioning time.
   NOTE: many ACME certificate providers set an internal limit of 10 subdomain labels.
 - `max_certs_per_domain`
   Maximum number of unique approved names per domain. Default: -1 (no limit).
   Approval state is persisted in Caddy storage, so the limit survives restarts and is shared by multiple Caddy instances using the same storage backend.
+  Accepts a Caddy [placeholder](https://caddyserver.com/docs/conventions#placeholders) value (e.g. `{env.MAX_CERTS_PER_DOMAIN}`), resolved at provisioning time.
 - `rate_limit`
   Limit the total number of certificate approvals across all domains within a rolling time window.
   Requires two arguments: `limit` (maximum number of approvals) and `duration` (the window length, e.g. `1h`, `30m`).

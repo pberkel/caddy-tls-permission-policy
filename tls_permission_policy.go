@@ -59,18 +59,20 @@ type PermissionByPolicy struct {
 	// Limit certificate approvals per registrable domain in a rolling window.
 	PerDomainRateLimit *RateLimit `json:"per_domain_rate_limit,omitempty"`
 
-	logger            *zap.Logger                                                 `json:"-"`
-	replacer          *caddy.Replacer                                             `json:"-"`
-	storage           certmagic.Storage                                           `json:"-"`
-	dnsClient         *miekgdns.Client                                            `json:"-"`
-	allowRegexp       []*regexp.Regexp                                            `json:"-"`
-	denyRegexp        []*regexp.Regexp                                            `json:"-"`
-	allowSubdomainSet map[string]struct{}                                         `json:"-"`
-	denySubdomainSet  map[string]struct{}                                         `json:"-"`
-	lookupNetIP       func(context.Context, string, string) ([]netip.Addr, error) `json:"-"`
-	approvals         *approvalState                                              `json:"-"`
-	resolvedTargets   *resolvedTargetsCache                                       `json:"-"`
-	rateLimiter       *rateLimitState                                             `json:"-"`
+	logger               *zap.Logger                                                 `json:"-"`
+	replacer             *caddy.Replacer                                             `json:"-"`
+	storage              certmagic.Storage                                           `json:"-"`
+	dnsClient            *miekgdns.Client                                            `json:"-"`
+	allowRegexp          []*regexp.Regexp                                            `json:"-"`
+	denyRegexp           []*regexp.Regexp                                            `json:"-"`
+	allowSubdomainSet    map[string]struct{}                                         `json:"-"`
+	denySubdomainSet     map[string]struct{}                                         `json:"-"`
+	lookupNetIP          func(context.Context, string, string) ([]netip.Addr, error) `json:"-"`
+	maxSubdomainDepthRaw string                                                      `json:"-"`
+	maxCertsPerDomainRaw string                                                      `json:"-"`
+	approvals            *approvalState                                              `json:"-"`
+	resolvedTargets      *resolvedTargetsCache                                       `json:"-"`
+	rateLimiter          *rateLimitState                                             `json:"-"`
 }
 
 type approvalState struct {
