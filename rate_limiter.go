@@ -2,6 +2,7 @@ package tlspermissionpolicy
 
 import (
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -128,4 +129,41 @@ func (s *rateLimitState) recordDomain(domain string) {
 	}
 	w.advance(now, d)
 	w.currCount++
+}
+
+// resolve replaces Caddy placeholders in LimitRaw and DurationRaw and stores
+// the parsed values in Limit and Duration. It is a no-op when rl is nil or
+// LimitRaw is empty (JSON-configured module, no raw values to process).
+func (rl *RateLimit) resolve(replacer *caddy.Replacer, name string) error {
+	if rl == nil || rl.LimitRaw == "" {
+		return nil
+	}
+	limitStr := replacer.ReplaceAll(rl.LimitRaw, "")
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil {
+		return fmt.Errorf("invalid integer value for %s limit: %s", name, limitStr)
+	}
+	durStr := replacer.ReplaceAll(rl.DurationRaw, "")
+	dur, err := caddy.ParseDuration(durStr)
+	if err != nil {
+		return fmt.Errorf("invalid duration value for %s: %s", name, durStr)
+	}
+	rl.Limit = limit
+	rl.Duration = caddy.Duration(dur)
+	return nil
+}
+
+// validate returns an error if the rate limit configuration is invalid.
+// It is a no-op when rl is nil.
+func (rl *RateLimit) validate(name string) error {
+	if rl == nil {
+		return nil
+	}
+	if rl.Limit <= 0 {
+		return fmt.Errorf("%s limit must be greater than 0, got %d", name, rl.Limit)
+	}
+	if time.Duration(rl.Duration) <= 0 {
+		return fmt.Errorf("%s duration must be greater than 0", name)
+	}
+	return nil
 }

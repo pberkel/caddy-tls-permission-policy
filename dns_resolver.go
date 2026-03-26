@@ -60,7 +60,7 @@ func (p *PermissionByPolicy) resolveAddrsWithClient(ctx context.Context, name st
 		seenNames[questionName] = struct{}{}
 
 		cnameTarget = ""
-		resolved = make(map[netip.Addr]struct{})
+		clear(resolved)
 
 		// Query every configured nameserver for both record types. If one nameserver
 		// returns a CNAME and another returns A/AAAA records for the same name, the

@@ -38,6 +38,18 @@ func (PermissionByPolicy) CaddyModule() caddy.ModuleInfo {
 
 // UnmarshalCaddyfile implements caddyfile.Unmarshaler.
 func (p *PermissionByPolicy) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
+	parseBoolInto := func(dest *bool, key string, vals []string) error {
+		if len(vals) > 1 {
+			return d.Errf("too many arguments supplied to %s", key)
+		}
+		v, err := strconv.ParseBool(vals[0])
+		if err != nil {
+			return d.Errf("invalid boolean value for %s: %s", key, vals[0])
+		}
+		*dest = v
+		return nil
+	}
+
 	for d.Next() {
 		for nesting := d.Nesting(); d.NextBlock(nesting); {
 			// Obtain configuration key and parameters on the same line.
@@ -78,32 +90,17 @@ func (p *PermissionByPolicy) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				}
 				p.MaxCertsPerDomainRaw = configVal[0]
 			case "permit_ip":
-				if len(configVal) > 1 {
-					return d.Err("too many arguments supplied to permit_ip")
+				if err := parseBoolInto(&p.PermitIP, configKey, configVal); err != nil {
+					return err
 				}
-				permitIP, err := strconv.ParseBool(configVal[0])
-				if err != nil {
-					return d.Errf("invalid boolean value for permit_ip: %s", configVal[0])
-				}
-				p.PermitIP = permitIP
 			case "permit_local":
-				if len(configVal) > 1 {
-					return d.Err("too many arguments supplied to permit_local")
+				if err := parseBoolInto(&p.PermitLocal, configKey, configVal); err != nil {
+					return err
 				}
-				permitLocal, err := strconv.ParseBool(configVal[0])
-				if err != nil {
-					return d.Errf("invalid boolean value for permit_local: %s", configVal[0])
-				}
-				p.PermitLocal = permitLocal
 			case "permit_all":
-				if len(configVal) > 1 {
-					return d.Err("too many arguments supplied to permit_all")
+				if err := parseBoolInto(&p.PermitAll, configKey, configVal); err != nil {
+					return err
 				}
-				permitAll, err := strconv.ParseBool(configVal[0])
-				if err != nil {
-					return d.Errf("invalid boolean value for permit_all: %s", configVal[0])
-				}
-				p.PermitAll = permitAll
 			case "rate_limit":
 				if len(configVal) != 2 {
 					return d.Err("rate_limit requires exactly two arguments: limit and duration")
@@ -125,9 +122,8 @@ func (p *PermissionByPolicy) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 // Provision prepares derived state needed during permission checks.
 func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 	p.logger = ctx.Logger()
-	p.replacer = caddy.NewReplacer()
+	replacer := caddy.NewReplacer()
 	p.storage = ctx.Storage()
-	p.dnsClient = nil
 	p.allowRegexp = nil
 	p.denyRegexp = nil
 	p.lookupNetIP = net.DefaultResolver.LookupNetIP
@@ -142,7 +138,7 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 	// Replace placeholders in max_subdomain_depth and max_certs_per_domain raw values (set
 	// during Caddyfile parsing) and parse them into the concrete fields used at runtime.
 	if p.MaxSubdomainDepthRaw != "" {
-		raw := p.replacer.ReplaceAll(p.MaxSubdomainDepthRaw, "")
+		raw := replacer.ReplaceAll(p.MaxSubdomainDepthRaw, "")
 		val, err := strconv.Atoi(raw)
 		if err != nil {
 			return fmt.Errorf("invalid integer value for max_subdomain_depth: %s", raw)
@@ -150,7 +146,7 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 		p.MaxSubdomainDepth = val
 	}
 	if p.MaxCertsPerDomainRaw != "" {
-		raw := p.replacer.ReplaceAll(p.MaxCertsPerDomainRaw, "")
+		raw := replacer.ReplaceAll(p.MaxCertsPerDomainRaw, "")
 		val, err := strconv.Atoi(raw)
 		if err != nil {
 			return fmt.Errorf("invalid integer value for max_certs_per_domain: %s", raw)
@@ -185,14 +181,14 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 	// Normalize input parameters and build lookup sets for O(1) subdomain matching.
 	p.allowSubdomainSet = make(map[string]struct{}, len(p.AllowSubdomain))
 	for i, subdomain := range p.AllowSubdomain {
-		subdomain = p.replacer.ReplaceAll(subdomain, "")
+		subdomain = replacer.ReplaceAll(subdomain, "")
 		subdomain = strings.ToLower(subdomain)
 		p.AllowSubdomain[i] = subdomain
 		p.allowSubdomainSet[subdomain] = struct{}{}
 	}
 	p.denySubdomainSet = make(map[string]struct{}, len(p.DenySubdomain))
 	for i, subdomain := range p.DenySubdomain {
-		subdomain = p.replacer.ReplaceAll(subdomain, "")
+		subdomain = replacer.ReplaceAll(subdomain, "")
 		subdomain = strings.ToLower(subdomain)
 		p.DenySubdomain[i] = subdomain
 		p.denySubdomainSet[subdomain] = struct{}{}
@@ -200,7 +196,7 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 
 	// Compile regular expressions if provided.
 	for _, r := range p.AllowRegexp {
-		r = p.replacer.ReplaceAll(r, "")
+		r = replacer.ReplaceAll(r, "")
 		re, err := regexp.Compile(r)
 		if err != nil {
 			return fmt.Errorf("compilation of allow regexp '%s' failed: %w", r, err)
@@ -208,7 +204,7 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 		p.allowRegexp = append(p.allowRegexp, re)
 	}
 	for _, r := range p.DenyRegexp {
-		r = p.replacer.ReplaceAll(r, "")
+		r = replacer.ReplaceAll(r, "")
 		re, err := regexp.Compile(r)
 		if err != nil {
 			return fmt.Errorf("compilation of deny regexp '%s' failed: %w", r, err)
@@ -218,10 +214,10 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 
 	// replace ResolvesTo & Nameserver placeholder values if present
 	for i, value := range p.ResolvesTo {
-		p.ResolvesTo[i] = p.replacer.ReplaceAll(value, "")
+		p.ResolvesTo[i] = replacer.ReplaceAll(value, "")
 	}
 	for i, value := range p.Nameserver {
-		value = p.replacer.ReplaceAll(value, "")
+		value = replacer.ReplaceAll(value, "")
 		host, port, err := net.SplitHostPort(value)
 		if err != nil {
 			return fmt.Errorf("invalid nameserver %q: must be in host:port form", value)
@@ -241,51 +237,19 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 
 	// Replace placeholders in rate limit raw values (set during Caddyfile parsing) and
 	// parse them into the concrete Limit and Duration fields used at runtime.
-	if p.GlobalRateLimit != nil && p.GlobalRateLimit.LimitRaw != "" {
-		limitStr := p.replacer.ReplaceAll(p.GlobalRateLimit.LimitRaw, "")
-		limit, err := strconv.Atoi(limitStr)
-		if err != nil {
-			return fmt.Errorf("invalid integer value for rate_limit limit: %s", limitStr)
-		}
-		durStr := p.replacer.ReplaceAll(p.GlobalRateLimit.DurationRaw, "")
-		dur, err := caddy.ParseDuration(durStr)
-		if err != nil {
-			return fmt.Errorf("invalid duration value for rate_limit: %s", durStr)
-		}
-		p.GlobalRateLimit.Limit = limit
-		p.GlobalRateLimit.Duration = caddy.Duration(dur)
+	if err := p.GlobalRateLimit.resolve(replacer, "rate_limit"); err != nil {
+		return err
 	}
-	if p.PerDomainRateLimit != nil && p.PerDomainRateLimit.LimitRaw != "" {
-		limitStr := p.replacer.ReplaceAll(p.PerDomainRateLimit.LimitRaw, "")
-		limit, err := strconv.Atoi(limitStr)
-		if err != nil {
-			return fmt.Errorf("invalid integer value for per_domain_rate_limit limit: %s", limitStr)
-		}
-		durStr := p.replacer.ReplaceAll(p.PerDomainRateLimit.DurationRaw, "")
-		dur, err := caddy.ParseDuration(durStr)
-		if err != nil {
-			return fmt.Errorf("invalid duration value for per_domain_rate_limit: %s", durStr)
-		}
-		p.PerDomainRateLimit.Limit = limit
-		p.PerDomainRateLimit.Duration = caddy.Duration(dur)
+	if err := p.PerDomainRateLimit.resolve(replacer, "per_domain_rate_limit"); err != nil {
+		return err
 	}
 
 	// Validate and initialize rate limit state.
-	if p.GlobalRateLimit != nil {
-		if p.GlobalRateLimit.Limit <= 0 {
-			return fmt.Errorf("global_rate_limit limit must be greater than 0, got %d", p.GlobalRateLimit.Limit)
-		}
-		if time.Duration(p.GlobalRateLimit.Duration) <= 0 {
-			return fmt.Errorf("global_rate_limit duration must be greater than 0")
-		}
+	if err := p.GlobalRateLimit.validate("global_rate_limit"); err != nil {
+		return err
 	}
-	if p.PerDomainRateLimit != nil {
-		if p.PerDomainRateLimit.Limit <= 0 {
-			return fmt.Errorf("per_domain_rate_limit limit must be greater than 0, got %d", p.PerDomainRateLimit.Limit)
-		}
-		if time.Duration(p.PerDomainRateLimit.Duration) <= 0 {
-			return fmt.Errorf("per_domain_rate_limit duration must be greater than 0")
-		}
+	if err := p.PerDomainRateLimit.validate("per_domain_rate_limit"); err != nil {
+		return err
 	}
 	p.rateLimiter = &rateLimitState{
 		globalLimit:    p.GlobalRateLimit,

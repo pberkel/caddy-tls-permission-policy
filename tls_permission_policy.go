@@ -9,12 +9,11 @@ import (
 	"net/netip"
 	"path"
 	"regexp"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/modules/caddytls"
 	"github.com/caddyserver/certmagic"
 	miekgdns "github.com/miekg/dns"
@@ -67,7 +66,6 @@ type PermissionByPolicy struct {
 	PerDomainRateLimit *RateLimit `json:"per_domain_rate_limit,omitempty"`
 
 	logger            *zap.Logger                                                 `json:"-"`
-	replacer          *caddy.Replacer                                             `json:"-"`
 	storage           certmagic.Storage                                           `json:"-"`
 	dnsClient         *miekgdns.Client                                            `json:"-"`
 	allowRegexp       []*regexp.Regexp                                            `json:"-"`
@@ -147,11 +145,11 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 	// Resolve name into IP address(es) for policy checks.
 	var resolvedName []netip.Addr
 	if !p.PermitLocal || len(p.ResolvesTo) > 0 {
-		resolved, err := p.resolveAddrs(ctx, name)
+		var err error
+		resolvedName, err = p.resolveAddrs(ctx, name)
 		if err != nil {
 			return fmt.Errorf("%w: resolving name %q: %w", caddytls.ErrPermissionDenied, name, err)
 		}
-		resolvedName = resolved
 
 		if !p.PermitLocal {
 			for _, addr := range resolvedName {
@@ -445,7 +443,7 @@ func (p *PermissionByPolicy) storeDomainApprovals(ctx context.Context, effective
 	for subdomain := range domainApprovals {
 		subdomains = append(subdomains, subdomain)
 	}
-	sort.Strings(subdomains)
+	slices.Sort(subdomains)
 
 	approvalBytes, err := json.Marshal(storedDomainApprovals{Subdomains: subdomains})
 	if err != nil {
