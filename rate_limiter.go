@@ -13,6 +13,10 @@ import (
 type RateLimit struct {
 	Limit    int            `json:"limit"`
 	Duration caddy.Duration `json:"duration"`
+	// Raw string values set during Caddyfile parsing; may contain Caddy placeholders.
+	// Resolved to Limit and Duration during provisioning.
+	limitRaw    string
+	durationRaw string
 }
 
 // rateLimitState holds in-memory sliding-window counters for global and per-domain rate limits.

@@ -284,6 +284,142 @@ func TestUnmarshalCaddyfileAccumulatesRepeatedDirectives(t *testing.T) {
 	}
 }
 
+func TestUnmarshalCaddyfileRateLimitStoresRawValues(t *testing.T) {
+	policy := &PermissionByPolicy{}
+	dispenser := caddyfile.NewTestDispenser(`
+	permission {
+		rate_limit 100 1h
+		per_domain_rate_limit 5 24h
+	}
+	`)
+
+	if err := policy.UnmarshalCaddyfile(dispenser); err != nil {
+		t.Fatalf("unexpected unmarshal error: %v", err)
+	}
+
+	if policy.GlobalRateLimit == nil {
+		t.Fatal("expected GlobalRateLimit to be set")
+	}
+	if policy.GlobalRateLimit.limitRaw != "100" {
+		t.Errorf("expected GlobalRateLimit.limitRaw=%q, got %q", "100", policy.GlobalRateLimit.limitRaw)
+	}
+	if policy.GlobalRateLimit.durationRaw != "1h" {
+		t.Errorf("expected GlobalRateLimit.durationRaw=%q, got %q", "1h", policy.GlobalRateLimit.durationRaw)
+	}
+
+	if policy.PerDomainRateLimit == nil {
+		t.Fatal("expected PerDomainRateLimit to be set")
+	}
+	if policy.PerDomainRateLimit.limitRaw != "5" {
+		t.Errorf("expected PerDomainRateLimit.limitRaw=%q, got %q", "5", policy.PerDomainRateLimit.limitRaw)
+	}
+	if policy.PerDomainRateLimit.durationRaw != "24h" {
+		t.Errorf("expected PerDomainRateLimit.durationRaw=%q, got %q", "24h", policy.PerDomainRateLimit.durationRaw)
+	}
+}
+
+func TestUnmarshalCaddyfileRateLimitStoresPlaceholderValues(t *testing.T) {
+	policy := &PermissionByPolicy{}
+	dispenser := caddyfile.NewTestDispenser(`
+	permission {
+		rate_limit {env.RATE_LIMIT} {env.RATE_LIMIT_DURATION}
+		per_domain_rate_limit {env.DOMAIN_RATE_LIMIT} {env.DOMAIN_RATE_LIMIT_DURATION}
+	}
+	`)
+
+	if err := policy.UnmarshalCaddyfile(dispenser); err != nil {
+		t.Fatalf("unexpected unmarshal error: %v", err)
+	}
+
+	if policy.GlobalRateLimit == nil {
+		t.Fatal("expected GlobalRateLimit to be set")
+	}
+	if policy.GlobalRateLimit.limitRaw != "{env.RATE_LIMIT}" {
+		t.Errorf("expected raw placeholder to be stored, got %q", policy.GlobalRateLimit.limitRaw)
+	}
+	if policy.GlobalRateLimit.durationRaw != "{env.RATE_LIMIT_DURATION}" {
+		t.Errorf("expected raw placeholder to be stored, got %q", policy.GlobalRateLimit.durationRaw)
+	}
+}
+
+func TestProvisionReplacesRateLimitPlaceholders(t *testing.T) {
+	t.Setenv("TEST_RATE_LIMIT", "10")
+	t.Setenv("TEST_RATE_LIMIT_DURATION", "1h")
+	t.Setenv("TEST_DOMAIN_RATE_LIMIT", "3")
+	t.Setenv("TEST_DOMAIN_RATE_LIMIT_DURATION", "24h")
+
+	policy := &PermissionByPolicy{}
+	policy.MaxSubdomainDepth = -1
+	policy.MaxCertsPerDomain = -1
+	policy.GlobalRateLimit = &RateLimit{
+		limitRaw:    "{env.TEST_RATE_LIMIT}",
+		durationRaw: "{env.TEST_RATE_LIMIT_DURATION}",
+	}
+	policy.PerDomainRateLimit = &RateLimit{
+		limitRaw:    "{env.TEST_DOMAIN_RATE_LIMIT}",
+		durationRaw: "{env.TEST_DOMAIN_RATE_LIMIT_DURATION}",
+	}
+
+	ctx, cancel := newProvisionContext(t)
+	defer cancel()
+
+	if err := policy.Provision(ctx); err != nil {
+		t.Fatalf("expected provision success, got %v", err)
+	}
+	if policy.GlobalRateLimit.Limit != 10 {
+		t.Errorf("expected GlobalRateLimit.Limit=10, got %d", policy.GlobalRateLimit.Limit)
+	}
+	if time.Duration(policy.GlobalRateLimit.Duration) != time.Hour {
+		t.Errorf("expected GlobalRateLimit.Duration=1h, got %v", time.Duration(policy.GlobalRateLimit.Duration))
+	}
+	if policy.PerDomainRateLimit.Limit != 3 {
+		t.Errorf("expected PerDomainRateLimit.Limit=3, got %d", policy.PerDomainRateLimit.Limit)
+	}
+	if time.Duration(policy.PerDomainRateLimit.Duration) != 24*time.Hour {
+		t.Errorf("expected PerDomainRateLimit.Duration=24h, got %v", time.Duration(policy.PerDomainRateLimit.Duration))
+	}
+}
+
+func TestProvisionFailsOnInvalidRateLimitPlaceholderValues(t *testing.T) {
+	t.Run("invalid limit after replacement", func(t *testing.T) {
+		t.Setenv("TEST_BAD_LIMIT", "notanint")
+
+		policy := &PermissionByPolicy{}
+		policy.MaxSubdomainDepth = -1
+		policy.MaxCertsPerDomain = -1
+		policy.GlobalRateLimit = &RateLimit{
+			limitRaw:    "{env.TEST_BAD_LIMIT}",
+			durationRaw: "1h",
+		}
+
+		ctx, cancel := newProvisionContext(t)
+		defer cancel()
+
+		if err := policy.Provision(ctx); err == nil {
+			t.Fatal("expected provision error for invalid limit, got nil")
+		}
+	})
+
+	t.Run("invalid duration after replacement", func(t *testing.T) {
+		t.Setenv("TEST_BAD_DURATION", "notaduration")
+
+		policy := &PermissionByPolicy{}
+		policy.MaxSubdomainDepth = -1
+		policy.MaxCertsPerDomain = -1
+		policy.GlobalRateLimit = &RateLimit{
+			limitRaw:    "5",
+			durationRaw: "{env.TEST_BAD_DURATION}",
+		}
+
+		ctx, cancel := newProvisionContext(t)
+		defer cancel()
+
+		if err := policy.Provision(ctx); err == nil {
+			t.Fatal("expected provision error for invalid duration, got nil")
+		}
+	})
+}
+
 func TestUnmarshalCaddyfileAllowsEmptyAllowSubdomainLiteral(t *testing.T) {
 	policy := &PermissionByPolicy{}
 	dispenser := caddyfile.NewTestDispenser(`

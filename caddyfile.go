@@ -116,28 +116,12 @@ func (p *PermissionByPolicy) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				if len(configVal) != 2 {
 					return d.Err("rate_limit requires exactly two arguments: limit and duration")
 				}
-				limit, err := strconv.Atoi(configVal[0])
-				if err != nil {
-					return d.Errf("invalid integer value for rate_limit limit: %s", configVal[0])
-				}
-				dur, err := caddy.ParseDuration(configVal[1])
-				if err != nil {
-					return d.Errf("invalid duration value for rate_limit: %s", configVal[1])
-				}
-				p.GlobalRateLimit = &RateLimit{Limit: limit, Duration: caddy.Duration(dur)}
+				p.GlobalRateLimit = &RateLimit{limitRaw: configVal[0], durationRaw: configVal[1]}
 			case "per_domain_rate_limit":
 				if len(configVal) != 2 {
 					return d.Err("per_domain_rate_limit requires exactly two arguments: limit and duration")
 				}
-				limit, err := strconv.Atoi(configVal[0])
-				if err != nil {
-					return d.Errf("invalid integer value for per_domain_rate_limit limit: %s", configVal[0])
-				}
-				dur, err := caddy.ParseDuration(configVal[1])
-				if err != nil {
-					return d.Errf("invalid duration value for per_domain_rate_limit: %s", configVal[1])
-				}
-				p.PerDomainRateLimit = &RateLimit{Limit: limit, Duration: caddy.Duration(dur)}
+				p.PerDomainRateLimit = &RateLimit{limitRaw: configVal[0], durationRaw: configVal[1]}
 			default:
 				return d.Errf("unrecognized configuration parameter: %s", configKey)
 			}
@@ -242,6 +226,37 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 	}
 	if len(p.Nameserver) > 0 {
 		p.dnsClient = &miekgdns.Client{Timeout: customDNSTimeout}
+	}
+
+	// Replace placeholders in rate limit raw values (set during Caddyfile parsing) and
+	// parse them into the concrete Limit and Duration fields used at runtime.
+	if p.GlobalRateLimit != nil && p.GlobalRateLimit.limitRaw != "" {
+		limitStr := p.replacer.ReplaceAll(p.GlobalRateLimit.limitRaw, "")
+		limit, err := strconv.Atoi(limitStr)
+		if err != nil {
+			return fmt.Errorf("invalid integer value for rate_limit limit: %s", limitStr)
+		}
+		durStr := p.replacer.ReplaceAll(p.GlobalRateLimit.durationRaw, "")
+		dur, err := caddy.ParseDuration(durStr)
+		if err != nil {
+			return fmt.Errorf("invalid duration value for rate_limit: %s", durStr)
+		}
+		p.GlobalRateLimit.Limit = limit
+		p.GlobalRateLimit.Duration = caddy.Duration(dur)
+	}
+	if p.PerDomainRateLimit != nil && p.PerDomainRateLimit.limitRaw != "" {
+		limitStr := p.replacer.ReplaceAll(p.PerDomainRateLimit.limitRaw, "")
+		limit, err := strconv.Atoi(limitStr)
+		if err != nil {
+			return fmt.Errorf("invalid integer value for per_domain_rate_limit limit: %s", limitStr)
+		}
+		durStr := p.replacer.ReplaceAll(p.PerDomainRateLimit.durationRaw, "")
+		dur, err := caddy.ParseDuration(durStr)
+		if err != nil {
+			return fmt.Errorf("invalid duration value for per_domain_rate_limit: %s", durStr)
+		}
+		p.PerDomainRateLimit.Limit = limit
+		p.PerDomainRateLimit.Duration = caddy.Duration(dur)
 	}
 
 	// Validate and initialize rate limit state.

@@ -135,10 +135,12 @@ The same configuration can be represented in JSON. This is a config snippet rath
   Limit the total number of certificate approvals across all domains within a rolling time window.
   Requires two arguments: `limit` (maximum number of approvals) and `duration` (the window length, e.g. `1h`, `30m`).
   Only approved requests count against the limit. The check is applied early to avoid unnecessary DNS resolution for over-limit requests.
+  Both arguments accept Caddy [placeholder](https://caddyserver.com/docs/conventions#placeholders) values (e.g. `{env.RATE_LIMIT}`), resolved at provisioning time.
 - `per_domain_rate_limit`
   Limit the number of certificate approvals per registrable domain (e.g. `example.com`) within a rolling time window.
   Requires two arguments: `limit` and `duration`. Each registrable domain has its own independent counter.
   Only approved requests count against the limit. Counters are held in memory only and reset when Caddy restarts.
+  Both arguments accept Caddy [placeholder](https://caddyserver.com/docs/conventions#placeholders) values (e.g. `{env.DOMAIN_RATE_LIMIT}`), resolved at provisioning time.
 - `permit_ip`
   Allow a certificate to be issued when the name is a direct IP address (only useful for Caddy internal / self-signed certificates). Default: false.
   When enabled, IP address names bypass all other policy checks (`deny_regexp`, `allow_regexp`, subdomain rules, `max_certs_per_domain`, rate limits) and are evaluated only against `permit_local` and `resolves_to`.

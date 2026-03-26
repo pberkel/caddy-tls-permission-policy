@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `rate_limit` configuration option to enforce a global rolling-window cap on certificate approvals across all domains (limit and duration).
 - `per_domain_rate_limit` configuration option to enforce a per-registrable-domain rolling-window cap on certificate approvals (limit and duration).
 - Rate limit checks are applied early in the policy pipeline to avoid unnecessary DNS resolution for over-limit requests.
+- Caddy [placeholder](https://caddyserver.com/docs/conventions#placeholders) support for `rate_limit` and `per_domain_rate_limit` limit and duration arguments.
 
 ---
 
