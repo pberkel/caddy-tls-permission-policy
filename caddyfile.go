@@ -173,8 +173,8 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 		len(p.AllowSubdomain) == 0 &&
 		len(p.DenySubdomain) == 0 &&
 		len(p.ResolvesTo) == 0 &&
-		p.MaxSubdomainDepth == -1 &&
-		p.MaxCertsPerDomain == -1 &&
+		p.MaxSubdomainDepth < 0 &&
+		p.MaxCertsPerDomain < 0 &&
 		p.GlobalRateLimit == nil &&
 		p.PerDomainRateLimit == nil &&
 		!p.PermitIP &&

@@ -119,7 +119,7 @@ The same configuration can be represented in JSON. This is a config snippet rath
   Values are normalized to lowercase during module provisioning.
 - `resolves_to`
   A list of one or more hostnames or IP addresses, typically mapping to the Caddy server that will be performing the TLS certificate request.
-  If the requested name does not DNS resolve to one or more of the hostnames / IP addresses provided, it will be denied.
+  All IPs that the requested name resolves to must be present in the set of IPs produced by the configured targets — if even one resolved IP is absent, the request is denied.
   Resolved target IP addresses are cached in memory for 5 minutes to avoid repeated DNS lookups on every certificate request.
 - `nameserver`
   A list of one or more name servers used to resolve DNS queries, each must be in the format HOST:PORT. If not specified, the system resolver will be used.
@@ -148,6 +148,7 @@ The same configuration can be represented in JSON. This is a config snippet rath
   When enabled, IP address names bypass all other policy checks (`deny_regexp`, `allow_regexp`, subdomain rules, `max_certs_per_domain`, rate limits) and are evaluated only against `permit_local` and `resolves_to`.
 - `permit_local`
   Allow a certificate to be issued to names that resolve to local, private, loopback, link-local, or unspecified addresses. Default: false.
+  Note: when `permit_local` is false (the default), DNS resolution is performed on every certificate request — even for policies that use only `allow_regexp`, `deny_regexp`, `allow_subdomain`, or `deny_subdomain` — in order to verify that the hostname does not resolve to a local address. Set `permit_local true` to skip this check and avoid the resolution overhead if local addresses are not a concern in your deployment.
 - `permit_all`
   Bypass all policy checks and allow every certificate request. Should never be used in production. Default: false.
 
@@ -163,7 +164,7 @@ The same configuration can be represented in JSON. This is a config snippet rath
 - `max_certs_per_domain` applies to DNS hostnames, not direct IP names.
 - Hostname approval uses exact per-name deduplication per domain in storage, so repeated requests for the same approved name do not consume the limit again.
 - The module keeps a short-lived 2-minute in-memory cache of domains that have reached `max_certs_per_domain` so that requests for already-full domains are rejected quickly without a storage read.
-- If `resolves_to` is configured, the requested name must already resolve successfully before it can be approved.
+- If `resolves_to` is configured, the requested name must resolve successfully and all of its resolved IPs must be present in the target set before it can be approved.
 - `rate_limit` and `per_domain_rate_limit` counters are in-memory only and are not shared across Caddy instances. Counts reset when Caddy restarts.
 - `per_domain_rate_limit` maintains one counter per approved registrable domain for the lifetime of the process. In deployments serving a very large number of unique domains, pairing it with `rate_limit` is recommended to bound the total number of tracked domains.
 
@@ -181,6 +182,6 @@ For each requested certificate name, the module applies a policy with the follow
 - If `allow_subdomain` is configured, the subdomain portion must match at least one configured `allow_subdomain` literal.
 - Hostnames matching any configured `deny_regexp` pattern are denied.
 - If `allow_regexp` is configured, hostnames must match at least one configured `allow_regexp` pattern.
-- If `resolves_to` is configured, the resolved IPs for the requested hostname must match the IPs produced by the configured `resolves_to` targets.
+- If `resolves_to` is configured, all resolved IPs for the requested hostname must be present in the set of IPs produced by the configured `resolves_to` targets.
 - If `max_certs_per_domain` is configured, the limit is authoritatively checked and the approval recorded in Caddy storage.
 - If `rate_limit` or `per_domain_rate_limit` is configured, the approval is recorded in the respective in-memory counter.

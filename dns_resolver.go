@@ -62,6 +62,11 @@ func (p *PermissionByPolicy) resolveAddrsWithClient(ctx context.Context, name st
 		cnameTarget = ""
 		resolved = make(map[netip.Addr]struct{})
 
+		// Query every configured nameserver for both record types. If one nameserver
+		// returns a CNAME and another returns A/AAAA records for the same name, the
+		// A/AAAA records take precedence (resolved is non-empty, loop breaks early and
+		// the CNAME is not followed). All configured nameservers are expected to return
+		// consistent records for a given name.
 		for _, nameserver := range p.Nameserver {
 			for _, qtype := range []uint16{miekgdns.TypeA, miekgdns.TypeAAAA} {
 				msg := &miekgdns.Msg{}
@@ -160,7 +165,8 @@ func (p *PermissionByPolicy) checkResolvesTo(ctx context.Context, resolved []net
 }
 
 // allowedTargetAddrs returns the cached set of allowed target IP addresses, resolving
-// all ResolvesTo targets if the cache is absent or expired.
+// all ResolvesTo targets if the cache is absent or expired. Concurrent cache misses are
+// coalesced via a singleflight group so that only one resolution runs at a time.
 func (p *PermissionByPolicy) allowedTargetAddrs(ctx context.Context) (map[netip.Addr]struct{}, error) {
 	cache := p.resolvedTargets
 
@@ -173,36 +179,39 @@ func (p *PermissionByPolicy) allowedTargetAddrs(ctx context.Context) (map[netip.
 	}
 	cache.mu.RUnlock()
 
-	// Double-check under write lock before committing to resolution.
-	cache.mu.Lock()
-	if cache.addrs != nil && cache.now().Before(cache.expiry) {
-		addrs := cache.addrs
+	// Coalesce concurrent cache misses: only one goroutine resolves at a time;
+	// the rest wait and share the result.
+	v, err, _ := cache.sf.Do("resolve", func() (any, error) {
+		// Double-check under write lock: a previous flight may have already refreshed.
+		cache.mu.Lock()
+		if cache.addrs != nil && cache.now().Before(cache.expiry) {
+			addrs := cache.addrs
+			cache.mu.Unlock()
+			return addrs, nil
+		}
 		cache.mu.Unlock()
-		return addrs, nil
-	}
-	cache.mu.Unlock()
 
-	// Resolve all targets outside the lock so readers are not blocked during DNS I/O.
-	// Multiple goroutines may resolve concurrently after a cache miss; this is safe
-	// since the final update is guarded and DNS results for stable targets are identical.
-	addrs := make(map[netip.Addr]struct{})
-	for _, target := range p.ResolvesTo {
-		targetAddrs, err := p.resolveAddrs(ctx, target)
-		if err != nil {
-			return nil, fmt.Errorf("%w: resolving resolves_to target %q: %v", caddytls.ErrPermissionDenied, target, err)
+		// Resolve all targets outside the lock so readers are not blocked during DNS I/O.
+		addrs := make(map[netip.Addr]struct{})
+		for _, target := range p.ResolvesTo {
+			targetAddrs, err := p.resolveAddrs(ctx, target)
+			if err != nil {
+				return nil, fmt.Errorf("%w: resolving resolves_to target %q: %w", caddytls.ErrPermissionDenied, target, err)
+			}
+			for _, addr := range targetAddrs {
+				addrs[addr] = struct{}{}
+			}
 		}
-		for _, addr := range targetAddrs {
-			addrs[addr.Unmap()] = struct{}{}
-		}
-	}
 
-	// Store result under write lock, but only if the cache is still stale — another
-	// goroutine may have completed resolution and written a fresh entry while we were resolving.
-	cache.mu.Lock()
-	defer cache.mu.Unlock()
-	if cache.addrs == nil || !cache.now().Before(cache.expiry) {
+		// Store result under write lock.
+		cache.mu.Lock()
 		cache.addrs = addrs
 		cache.expiry = cache.now().Add(resolvedTargetsCacheTTL)
+		cache.mu.Unlock()
+		return addrs, nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	return cache.addrs, nil
+	return v.(map[netip.Addr]struct{}), nil
 }

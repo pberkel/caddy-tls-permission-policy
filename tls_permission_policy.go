@@ -22,6 +22,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/net/publicsuffix"
+	"golang.org/x/sync/singleflight"
 )
 
 const defaultMaxSubdomainDepth = -1
@@ -40,12 +41,12 @@ type PermissionByPolicy struct {
 	DenySubdomain []string `json:"deny_subdomain,omitempty"`
 	// Allow certificates for hostnames that resolve to a specified hostname or IP address.
 	ResolvesTo []string `json:"resolves_to,omitempty"`
-	//  Optional name server hostname used to resolve DNS queries, must be in the format HOST:PORT.
+	// One or more optional name server addresses used to resolve DNS queries, each in HOST:PORT format.
 	Nameserver []string `json:"nameserver,omitempty"`
 	// The maximum number of unique names approved per registrable domain. Default -1 no limit.
-	MaxCertsPerDomain int `json:"max_certs_per_domain,omitempty"`
+	MaxCertsPerDomain int `json:"max_certs_per_domain"`
 	// The maximum subdomain depth measured to the left of the effective domain. The effective domain itself has depth 0. Default -1 no limit.
-	MaxSubdomainDepth int `json:"max_subdomain_depth,omitempty"`
+	MaxSubdomainDepth int `json:"max_subdomain_depth"`
 	// Allow certificates for IP address hosts. When true, IP address names bypass all other
 	// policy checks (regexp patterns, subdomain rules, domain certificate limits, rate limits) and are
 	// evaluated only against the permit_local and resolves_to policies. Default: false.
@@ -83,6 +84,7 @@ type approvalState struct {
 
 type resolvedTargetsCache struct {
 	mu     sync.RWMutex
+	sf     singleflight.Group
 	addrs  map[netip.Addr]struct{}
 	expiry time.Time
 	now    func() time.Time
@@ -204,10 +206,8 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 		// Check the number of domain labels does not exceed configured limit.
 		if p.MaxSubdomainDepth >= 0 {
 			var labels int
-			if effectiveSubdomain == "" {
-				labels = 0
-			} else {
-				labels = len(strings.Split(effectiveSubdomain, "."))
+			if effectiveSubdomain != "" {
+				labels = strings.Count(effectiveSubdomain, ".") + 1
 			}
 			if c := p.logger.Check(zapcore.DebugLevel, "evaluated max_subdomain_depth policy"); c != nil {
 				c.Write(

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [v1.2.0] - Unreleased
 
+### Changed
+- Removed `omitempty` from the `max_subdomain_depth` and `max_certs_per_domain` JSON tags. The value `0` is meaningful for both fields (depth 0 = apex only; 0 certs = deny all new names) and must survive JSON round-trips through the Caddy admin API.
+
 ### Added
 - `rate_limit` configuration option to enforce a global rolling-window cap on certificate approvals across all domains (limit and duration).
 - `per_domain_rate_limit` configuration option to enforce a per-registrable-domain rolling-window cap on certificate approvals (limit and duration).
@@ -30,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Extracted Caddyfile parsing and module provisioning into a dedicated `caddyfile.go` file.
 - `allow_subdomain` and `deny_subdomain` now use O(1) map lookups (built at provisioning time) instead of linear slice iteration.
 - Renamed `PermitIp` field to `PermitIP` to follow Go initialism naming conventions.
-- Added `omitempty` to the `max_certs_per_domain` JSON tag, consistent with `max_subdomain_depth`.
+- `max_certs_per_domain` and `max_subdomain_depth` now include their values in JSON output regardless of value (see v1.2.0 Changed for rationale).
 - Write lock in `resolves_to` target cache refresh is no longer held during DNS I/O, preventing concurrent readers from blocking for the full DNS timeout duration.
 - Updated README with corrected policy evaluation order, documented `resolves_to` caching behaviour, added missing `permit_all` option entry, and various corrections and clarifications.
 

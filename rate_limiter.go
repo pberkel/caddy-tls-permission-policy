@@ -32,6 +32,8 @@ type rateLimitState struct {
 // windowCounter implements a two-bucket sliding-window counter approximation.
 // It tracks the previous and current fixed-window counts, and interpolates
 // to produce an estimate of approvals within the past duration.
+// A zero-value windowCounter is ready to use; windowStart is initialized on
+// the first call to advance.
 type windowCounter struct {
 	prevCount   int
 	currCount   int
@@ -60,6 +62,7 @@ func (w *windowCounter) advance(now time.Time, d time.Duration) {
 }
 
 // estimate returns the approximate number of approvals in the sliding window ending at now.
+// Note: estimate calls advance internally and may rotate the counter's buckets as a side effect.
 func (w *windowCounter) estimate(now time.Time, d time.Duration) float64 {
 	w.advance(now, d)
 	elapsed := now.Sub(w.windowStart)
@@ -118,7 +121,7 @@ func (s *rateLimitState) recordDomain(domain string) {
 	d := time.Duration(s.perDomainLimit.Duration)
 	w, ok := s.domains[domain]
 	if !ok {
-		w = &windowCounter{windowStart: now}
+		w = &windowCounter{}
 		s.domains[domain] = w
 	}
 	w.advance(now, d)
