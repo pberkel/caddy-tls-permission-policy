@@ -45,8 +45,14 @@ type PermissionByPolicy struct {
 	Nameserver []string `json:"nameserver,omitempty"`
 	// The maximum number of unique names approved per registrable domain. Default -1 no limit.
 	MaxCertsPerDomain int `json:"max_certs_per_domain"`
+	// Raw string value for max_certs_per_domain; may contain Caddy placeholders resolved at provisioning time.
+	// When non-empty, takes precedence over MaxCertsPerDomain.
+	MaxCertsPerDomainRaw string `json:"max_certs_per_domain_raw,omitempty"`
 	// The maximum subdomain depth measured to the left of the effective domain. The effective domain itself has depth 0. Default -1 no limit.
 	MaxSubdomainDepth int `json:"max_subdomain_depth"`
+	// Raw string value for max_subdomain_depth; may contain Caddy placeholders resolved at provisioning time.
+	// When non-empty, takes precedence over MaxSubdomainDepth.
+	MaxSubdomainDepthRaw string `json:"max_subdomain_depth_raw,omitempty"`
 	// Allow certificates for IP address hosts. When true, IP address names bypass all other
 	// policy checks (regexp patterns, subdomain rules, domain certificate limits, rate limits) and are
 	// evaluated only against the permit_local and resolves_to policies. Default: false.
@@ -60,20 +66,18 @@ type PermissionByPolicy struct {
 	// Limit certificate approvals per registrable domain in a rolling window.
 	PerDomainRateLimit *RateLimit `json:"per_domain_rate_limit,omitempty"`
 
-	logger               *zap.Logger                                                 `json:"-"`
-	replacer             *caddy.Replacer                                             `json:"-"`
-	storage              certmagic.Storage                                           `json:"-"`
-	dnsClient            *miekgdns.Client                                            `json:"-"`
-	allowRegexp          []*regexp.Regexp                                            `json:"-"`
-	denyRegexp           []*regexp.Regexp                                            `json:"-"`
-	allowSubdomainSet    map[string]struct{}                                         `json:"-"`
-	denySubdomainSet     map[string]struct{}                                         `json:"-"`
-	lookupNetIP          func(context.Context, string, string) ([]netip.Addr, error) `json:"-"`
-	maxSubdomainDepthRaw string                                                      `json:"-"`
-	maxCertsPerDomainRaw string                                                      `json:"-"`
-	approvals            *approvalState                                              `json:"-"`
-	resolvedTargets      *resolvedTargetsCache                                       `json:"-"`
-	rateLimiter          *rateLimitState                                             `json:"-"`
+	logger            *zap.Logger                                                 `json:"-"`
+	replacer          *caddy.Replacer                                             `json:"-"`
+	storage           certmagic.Storage                                           `json:"-"`
+	dnsClient         *miekgdns.Client                                            `json:"-"`
+	allowRegexp       []*regexp.Regexp                                            `json:"-"`
+	denyRegexp        []*regexp.Regexp                                            `json:"-"`
+	allowSubdomainSet map[string]struct{}                                         `json:"-"`
+	denySubdomainSet  map[string]struct{}                                         `json:"-"`
+	lookupNetIP       func(context.Context, string, string) ([]netip.Addr, error) `json:"-"`
+	approvals         *approvalState                                              `json:"-"`
+	resolvedTargets   *resolvedTargetsCache                                       `json:"-"`
+	rateLimiter       *rateLimitState                                             `json:"-"`
 }
 
 type approvalState struct {

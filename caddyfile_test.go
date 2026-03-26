@@ -300,21 +300,21 @@ func TestUnmarshalCaddyfileRateLimitStoresRawValues(t *testing.T) {
 	if policy.GlobalRateLimit == nil {
 		t.Fatal("expected GlobalRateLimit to be set")
 	}
-	if policy.GlobalRateLimit.limitRaw != "100" {
-		t.Errorf("expected GlobalRateLimit.limitRaw=%q, got %q", "100", policy.GlobalRateLimit.limitRaw)
+	if policy.GlobalRateLimit.LimitRaw != "100" {
+		t.Errorf("expected GlobalRateLimit.LimitRaw=%q, got %q", "100", policy.GlobalRateLimit.LimitRaw)
 	}
-	if policy.GlobalRateLimit.durationRaw != "1h" {
-		t.Errorf("expected GlobalRateLimit.durationRaw=%q, got %q", "1h", policy.GlobalRateLimit.durationRaw)
+	if policy.GlobalRateLimit.DurationRaw != "1h" {
+		t.Errorf("expected GlobalRateLimit.DurationRaw=%q, got %q", "1h", policy.GlobalRateLimit.DurationRaw)
 	}
 
 	if policy.PerDomainRateLimit == nil {
 		t.Fatal("expected PerDomainRateLimit to be set")
 	}
-	if policy.PerDomainRateLimit.limitRaw != "5" {
-		t.Errorf("expected PerDomainRateLimit.limitRaw=%q, got %q", "5", policy.PerDomainRateLimit.limitRaw)
+	if policy.PerDomainRateLimit.LimitRaw != "5" {
+		t.Errorf("expected PerDomainRateLimit.LimitRaw=%q, got %q", "5", policy.PerDomainRateLimit.LimitRaw)
 	}
-	if policy.PerDomainRateLimit.durationRaw != "24h" {
-		t.Errorf("expected PerDomainRateLimit.durationRaw=%q, got %q", "24h", policy.PerDomainRateLimit.durationRaw)
+	if policy.PerDomainRateLimit.DurationRaw != "24h" {
+		t.Errorf("expected PerDomainRateLimit.DurationRaw=%q, got %q", "24h", policy.PerDomainRateLimit.DurationRaw)
 	}
 }
 
@@ -334,11 +334,11 @@ func TestUnmarshalCaddyfileRateLimitStoresPlaceholderValues(t *testing.T) {
 	if policy.GlobalRateLimit == nil {
 		t.Fatal("expected GlobalRateLimit to be set")
 	}
-	if policy.GlobalRateLimit.limitRaw != "{env.RATE_LIMIT}" {
-		t.Errorf("expected raw placeholder to be stored, got %q", policy.GlobalRateLimit.limitRaw)
+	if policy.GlobalRateLimit.LimitRaw != "{env.RATE_LIMIT}" {
+		t.Errorf("expected raw placeholder to be stored, got %q", policy.GlobalRateLimit.LimitRaw)
 	}
-	if policy.GlobalRateLimit.durationRaw != "{env.RATE_LIMIT_DURATION}" {
-		t.Errorf("expected raw placeholder to be stored, got %q", policy.GlobalRateLimit.durationRaw)
+	if policy.GlobalRateLimit.DurationRaw != "{env.RATE_LIMIT_DURATION}" {
+		t.Errorf("expected raw placeholder to be stored, got %q", policy.GlobalRateLimit.DurationRaw)
 	}
 }
 
@@ -352,12 +352,12 @@ func TestProvisionReplacesRateLimitPlaceholders(t *testing.T) {
 	policy.MaxSubdomainDepth = -1
 	policy.MaxCertsPerDomain = -1
 	policy.GlobalRateLimit = &RateLimit{
-		limitRaw:    "{env.TEST_RATE_LIMIT}",
-		durationRaw: "{env.TEST_RATE_LIMIT_DURATION}",
+		LimitRaw:    "{env.TEST_RATE_LIMIT}",
+		DurationRaw: "{env.TEST_RATE_LIMIT_DURATION}",
 	}
 	policy.PerDomainRateLimit = &RateLimit{
-		limitRaw:    "{env.TEST_DOMAIN_RATE_LIMIT}",
-		durationRaw: "{env.TEST_DOMAIN_RATE_LIMIT_DURATION}",
+		LimitRaw:    "{env.TEST_DOMAIN_RATE_LIMIT}",
+		DurationRaw: "{env.TEST_DOMAIN_RATE_LIMIT_DURATION}",
 	}
 
 	ctx, cancel := newProvisionContext(t)
@@ -392,8 +392,8 @@ func TestUnmarshalCaddyfileMaxCertsPerDomainStoresRawValue(t *testing.T) {
 		t.Fatalf("unexpected unmarshal error: %v", err)
 	}
 
-	if policy.maxCertsPerDomainRaw != "50" {
-		t.Errorf("expected maxCertsPerDomainRaw=%q, got %q", "50", policy.maxCertsPerDomainRaw)
+	if policy.MaxCertsPerDomainRaw != "50" {
+		t.Errorf("expected maxCertsPerDomainRaw=%q, got %q", "50", policy.MaxCertsPerDomainRaw)
 	}
 	// MaxCertsPerDomain should not be parsed until Provision resolves the raw value.
 	if policy.MaxCertsPerDomain != 0 {
@@ -413,8 +413,8 @@ func TestUnmarshalCaddyfileMaxCertsPerDomainStoresPlaceholderValue(t *testing.T)
 		t.Fatalf("unexpected unmarshal error: %v", err)
 	}
 
-	if policy.maxCertsPerDomainRaw != "{env.MAX_CERTS}" {
-		t.Errorf("expected raw placeholder to be stored, got %q", policy.maxCertsPerDomainRaw)
+	if policy.MaxCertsPerDomainRaw != "{env.MAX_CERTS}" {
+		t.Errorf("expected raw placeholder to be stored, got %q", policy.MaxCertsPerDomainRaw)
 	}
 }
 
@@ -423,7 +423,7 @@ func TestProvisionReplacesMaxCertsPerDomainPlaceholder(t *testing.T) {
 
 	policy := &PermissionByPolicy{}
 	policy.MaxSubdomainDepth = -1
-	policy.maxCertsPerDomainRaw = "{env.TEST_MAX_CERTS}"
+	policy.MaxCertsPerDomainRaw = "{env.TEST_MAX_CERTS}"
 
 	ctx, cancel := newProvisionContext(t)
 	defer cancel()
@@ -441,7 +441,7 @@ func TestProvisionFailsOnInvalidMaxCertsPerDomainPlaceholderValue(t *testing.T) 
 
 	policy := &PermissionByPolicy{}
 	policy.MaxSubdomainDepth = -1
-	policy.maxCertsPerDomainRaw = "{env.TEST_BAD_MAX_CERTS}"
+	policy.MaxCertsPerDomainRaw = "{env.TEST_BAD_MAX_CERTS}"
 
 	ctx, cancel := newProvisionContext(t)
 	defer cancel()
@@ -459,8 +459,8 @@ func TestProvisionFailsOnInvalidRateLimitPlaceholderValues(t *testing.T) {
 		policy.MaxSubdomainDepth = -1
 		policy.MaxCertsPerDomain = -1
 		policy.GlobalRateLimit = &RateLimit{
-			limitRaw:    "{env.TEST_BAD_LIMIT}",
-			durationRaw: "1h",
+			LimitRaw:    "{env.TEST_BAD_LIMIT}",
+			DurationRaw: "1h",
 		}
 
 		ctx, cancel := newProvisionContext(t)
@@ -478,8 +478,8 @@ func TestProvisionFailsOnInvalidRateLimitPlaceholderValues(t *testing.T) {
 		policy.MaxSubdomainDepth = -1
 		policy.MaxCertsPerDomain = -1
 		policy.GlobalRateLimit = &RateLimit{
-			limitRaw:    "5",
-			durationRaw: "{env.TEST_BAD_DURATION}",
+			LimitRaw:    "5",
+			DurationRaw: "{env.TEST_BAD_DURATION}",
 		}
 
 		ctx, cancel := newProvisionContext(t)
@@ -523,8 +523,8 @@ func TestUnmarshalCaddyfileMaxSubdomainDepthStoresRawValue(t *testing.T) {
 		t.Fatalf("unexpected unmarshal error: %v", err)
 	}
 
-	if policy.maxSubdomainDepthRaw != "3" {
-		t.Errorf("expected maxSubdomainDepthRaw=%q, got %q", "3", policy.maxSubdomainDepthRaw)
+	if policy.MaxSubdomainDepthRaw != "3" {
+		t.Errorf("expected maxSubdomainDepthRaw=%q, got %q", "3", policy.MaxSubdomainDepthRaw)
 	}
 	// MaxSubdomainDepth should not be parsed until Provision resolves the raw value.
 	if policy.MaxSubdomainDepth != 0 {
@@ -544,8 +544,8 @@ func TestUnmarshalCaddyfileMaxSubdomainDepthStoresPlaceholderValue(t *testing.T)
 		t.Fatalf("unexpected unmarshal error: %v", err)
 	}
 
-	if policy.maxSubdomainDepthRaw != "{env.MAX_DEPTH}" {
-		t.Errorf("expected raw placeholder to be stored, got %q", policy.maxSubdomainDepthRaw)
+	if policy.MaxSubdomainDepthRaw != "{env.MAX_DEPTH}" {
+		t.Errorf("expected raw placeholder to be stored, got %q", policy.MaxSubdomainDepthRaw)
 	}
 }
 
@@ -554,7 +554,7 @@ func TestProvisionReplacesMaxSubdomainDepthPlaceholder(t *testing.T) {
 
 	policy := &PermissionByPolicy{}
 	policy.MaxCertsPerDomain = -1
-	policy.maxSubdomainDepthRaw = "{env.TEST_MAX_DEPTH}"
+	policy.MaxSubdomainDepthRaw = "{env.TEST_MAX_DEPTH}"
 
 	ctx, cancel := newProvisionContext(t)
 	defer cancel()
@@ -572,7 +572,7 @@ func TestProvisionFailsOnInvalidMaxSubdomainDepthPlaceholderValue(t *testing.T) 
 
 	policy := &PermissionByPolicy{}
 	policy.MaxCertsPerDomain = -1
-	policy.maxSubdomainDepthRaw = "{env.TEST_BAD_MAX_DEPTH}"
+	policy.MaxSubdomainDepthRaw = "{env.TEST_BAD_MAX_DEPTH}"
 
 	ctx, cancel := newProvisionContext(t)
 	defer cancel()

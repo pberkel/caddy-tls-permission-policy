@@ -71,12 +71,12 @@ func (p *PermissionByPolicy) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				if len(configVal) > 1 {
 					return d.Err("too many arguments supplied to max_subdomain_depth")
 				}
-				p.maxSubdomainDepthRaw = configVal[0]
+				p.MaxSubdomainDepthRaw = configVal[0]
 			case "max_certs_per_domain":
 				if len(configVal) > 1 {
 					return d.Err("too many arguments supplied to max_certs_per_domain")
 				}
-				p.maxCertsPerDomainRaw = configVal[0]
+				p.MaxCertsPerDomainRaw = configVal[0]
 			case "permit_ip":
 				if len(configVal) > 1 {
 					return d.Err("too many arguments supplied to permit_ip")
@@ -108,12 +108,12 @@ func (p *PermissionByPolicy) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				if len(configVal) != 2 {
 					return d.Err("rate_limit requires exactly two arguments: limit and duration")
 				}
-				p.GlobalRateLimit = &RateLimit{limitRaw: configVal[0], durationRaw: configVal[1]}
+				p.GlobalRateLimit = &RateLimit{LimitRaw: configVal[0], DurationRaw: configVal[1]}
 			case "per_domain_rate_limit":
 				if len(configVal) != 2 {
 					return d.Err("per_domain_rate_limit requires exactly two arguments: limit and duration")
 				}
-				p.PerDomainRateLimit = &RateLimit{limitRaw: configVal[0], durationRaw: configVal[1]}
+				p.PerDomainRateLimit = &RateLimit{LimitRaw: configVal[0], DurationRaw: configVal[1]}
 			default:
 				return d.Errf("unrecognized configuration parameter: %s", configKey)
 			}
@@ -141,16 +141,16 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 
 	// Replace placeholders in max_subdomain_depth and max_certs_per_domain raw values (set
 	// during Caddyfile parsing) and parse them into the concrete fields used at runtime.
-	if p.maxSubdomainDepthRaw != "" {
-		raw := p.replacer.ReplaceAll(p.maxSubdomainDepthRaw, "")
+	if p.MaxSubdomainDepthRaw != "" {
+		raw := p.replacer.ReplaceAll(p.MaxSubdomainDepthRaw, "")
 		val, err := strconv.Atoi(raw)
 		if err != nil {
 			return fmt.Errorf("invalid integer value for max_subdomain_depth: %s", raw)
 		}
 		p.MaxSubdomainDepth = val
 	}
-	if p.maxCertsPerDomainRaw != "" {
-		raw := p.replacer.ReplaceAll(p.maxCertsPerDomainRaw, "")
+	if p.MaxCertsPerDomainRaw != "" {
+		raw := p.replacer.ReplaceAll(p.MaxCertsPerDomainRaw, "")
 		val, err := strconv.Atoi(raw)
 		if err != nil {
 			return fmt.Errorf("invalid integer value for max_certs_per_domain: %s", raw)
@@ -241,13 +241,13 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 
 	// Replace placeholders in rate limit raw values (set during Caddyfile parsing) and
 	// parse them into the concrete Limit and Duration fields used at runtime.
-	if p.GlobalRateLimit != nil && p.GlobalRateLimit.limitRaw != "" {
-		limitStr := p.replacer.ReplaceAll(p.GlobalRateLimit.limitRaw, "")
+	if p.GlobalRateLimit != nil && p.GlobalRateLimit.LimitRaw != "" {
+		limitStr := p.replacer.ReplaceAll(p.GlobalRateLimit.LimitRaw, "")
 		limit, err := strconv.Atoi(limitStr)
 		if err != nil {
 			return fmt.Errorf("invalid integer value for rate_limit limit: %s", limitStr)
 		}
-		durStr := p.replacer.ReplaceAll(p.GlobalRateLimit.durationRaw, "")
+		durStr := p.replacer.ReplaceAll(p.GlobalRateLimit.DurationRaw, "")
 		dur, err := caddy.ParseDuration(durStr)
 		if err != nil {
 			return fmt.Errorf("invalid duration value for rate_limit: %s", durStr)
@@ -255,13 +255,13 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 		p.GlobalRateLimit.Limit = limit
 		p.GlobalRateLimit.Duration = caddy.Duration(dur)
 	}
-	if p.PerDomainRateLimit != nil && p.PerDomainRateLimit.limitRaw != "" {
-		limitStr := p.replacer.ReplaceAll(p.PerDomainRateLimit.limitRaw, "")
+	if p.PerDomainRateLimit != nil && p.PerDomainRateLimit.LimitRaw != "" {
+		limitStr := p.replacer.ReplaceAll(p.PerDomainRateLimit.LimitRaw, "")
 		limit, err := strconv.Atoi(limitStr)
 		if err != nil {
 			return fmt.Errorf("invalid integer value for per_domain_rate_limit limit: %s", limitStr)
 		}
-		durStr := p.replacer.ReplaceAll(p.PerDomainRateLimit.durationRaw, "")
+		durStr := p.replacer.ReplaceAll(p.PerDomainRateLimit.DurationRaw, "")
 		dur, err := caddy.ParseDuration(durStr)
 		if err != nil {
 			return fmt.Errorf("invalid duration value for per_domain_rate_limit: %s", durStr)

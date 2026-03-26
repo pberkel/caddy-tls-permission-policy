@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [v1.2.0] - Unreleased
 
+### Fixed
+- Caddyfile-configured `rate_limit`, `per_domain_rate_limit`, `max_subdomain_depth`, and `max_certs_per_domain` values were silently lost during the Caddyfile → JSON → provision round-trip because raw string fields were tagged `json:"-"` and not serialized. This caused provision errors ("limit must be greater than 0") and silent reversion to zero values. Raw fields are now exported and JSON-visible (`limit_raw`, `duration_raw`, `max_subdomain_depth_raw`, `max_certs_per_domain_raw`) with `omitempty` so they survive serialization and take precedence at provision time.
+
 ### Changed
 - Removed `omitempty` from the `max_subdomain_depth` and `max_certs_per_domain` JSON tags. The value `0` is meaningful for both fields (depth 0 = apex only; 0 certs = deny all new names) and must survive JSON round-trips through the Caddy admin API.
 

@@ -11,12 +11,14 @@ import (
 
 // RateLimit defines a sliding-window rate limit: at most Limit approvals per Duration.
 type RateLimit struct {
-	Limit    int            `json:"limit"`
-	Duration caddy.Duration `json:"duration"`
-	// Raw string values set during Caddyfile parsing; may contain Caddy placeholders.
-	// Resolved to Limit and Duration during provisioning.
-	limitRaw    string
-	durationRaw string
+	Limit    int            `json:"limit,omitempty"`
+	Duration caddy.Duration `json:"duration,omitempty"`
+	// LimitRaw and DurationRaw hold raw string values set during Caddyfile parsing; they may
+	// contain Caddy placeholders resolved at provisioning time. When non-empty, they take
+	// precedence over Limit and Duration and must survive JSON serialization so that the
+	// Caddyfile → JSON → provision round-trip preserves placeholder expressions.
+	LimitRaw    string `json:"limit_raw,omitempty"`
+	DurationRaw string `json:"duration_raw,omitempty"`
 }
 
 // rateLimitState holds in-memory sliding-window counters for global and per-domain rate limits.
