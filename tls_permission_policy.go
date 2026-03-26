@@ -47,13 +47,17 @@ type PermissionByPolicy struct {
 	// The maximum subdomain depth measured to the left of the effective domain. The effective domain itself has depth 0. Default -1 no limit.
 	MaxSubdomainDepth int `json:"max_subdomain_depth,omitempty"`
 	// Allow certificates for IP address hosts. When true, IP address names bypass all other
-	// policy checks (regexp patterns, subdomain rules, domain certificate limits) and are
+	// policy checks (regexp patterns, subdomain rules, domain certificate limits, rate limits) and are
 	// evaluated only against the permit_local and resolves_to policies. Default: false.
 	PermitIP bool `json:"permit_ip"`
 	// Allow certificates for hostnames resolving to local, loopback, private, or unspecified addresses. Default: false.
 	PermitLocal bool `json:"permit_local"`
 	// Allow all names without applying hostname policy checks. Default: false.
 	PermitAll bool `json:"permit_all"`
+	// Limit certificate approvals across all domains in a rolling window.
+	GlobalRateLimit *RateLimit `json:"global_rate_limit,omitempty"`
+	// Limit certificate approvals per registrable domain in a rolling window.
+	PerDomainRateLimit *RateLimit `json:"per_domain_rate_limit,omitempty"`
 
 	logger            *zap.Logger                                                 `json:"-"`
 	replacer          *caddy.Replacer                                             `json:"-"`
@@ -66,6 +70,7 @@ type PermissionByPolicy struct {
 	lookupNetIP       func(context.Context, string, string) ([]netip.Addr, error) `json:"-"`
 	approvals         *approvalState                                              `json:"-"`
 	resolvedTargets   *resolvedTargetsCache                                       `json:"-"`
+	rateLimiter       *rateLimitState                                             `json:"-"`
 }
 
 type approvalState struct {
@@ -124,6 +129,13 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 		return fmt.Errorf("%w: empty name is not allowed", caddytls.ErrPermissionDenied)
 	}
 
+	// Check global rate limit early to avoid expensive DNS lookups for over-limit requests.
+	if p.GlobalRateLimit != nil {
+		if err := p.rateLimiter.checkGlobal(); err != nil {
+			return err
+		}
+	}
+
 	// Resolve name into IP address(es) for policy checks.
 	var resolvedName []netip.Addr
 	if !p.PermitLocal || len(p.ResolvesTo) > 0 {
@@ -148,7 +160,7 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 	// And subdomain (everything to the left of the effective domain).
 	effectiveSubdomain, effectiveDomain := "", name
 	certsPerDomainChecked := false
-	if p.MaxCertsPerDomain >= 0 || p.MaxSubdomainDepth >= 0 || len(p.denySubdomainSet) > 0 || len(p.allowSubdomainSet) > 0 {
+	if p.MaxCertsPerDomain >= 0 || p.MaxSubdomainDepth >= 0 || len(p.denySubdomainSet) > 0 || len(p.allowSubdomainSet) > 0 || p.PerDomainRateLimit != nil {
 		domain, err := publicsuffix.EffectiveTLDPlusOne(name)
 		if err != nil {
 			return fmt.Errorf("%w: determining effective domain for %q: %w", caddytls.ErrPermissionDenied, name, err)
@@ -156,6 +168,13 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 		effectiveDomain = domain
 		if effectiveDomain != name {
 			effectiveSubdomain = strings.TrimSuffix(name, "."+effectiveDomain)
+		}
+
+		// Check per-domain rate limit early.
+		if p.PerDomainRateLimit != nil {
+			if err := p.rateLimiter.checkDomain(effectiveDomain); err != nil {
+				return err
+			}
 		}
 
 		// Perform an early limit check so requests that are already over the cap can fail
@@ -293,6 +312,14 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 		if err := p.checkCertsPerDomain(ctx, effectiveDomain, effectiveSubdomain); err != nil {
 			return err
 		}
+	}
+
+	// Record approved certificate in rate limit counters.
+	if p.GlobalRateLimit != nil {
+		p.rateLimiter.recordGlobal()
+	}
+	if p.PerDomainRateLimit != nil {
+		p.rateLimiter.recordDomain(effectiveDomain)
 	}
 
 	if c := p.logger.Check(zapcore.DebugLevel, "certificate request allowed by policy"); c != nil {

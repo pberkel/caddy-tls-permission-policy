@@ -28,6 +28,8 @@ Configure the module in an on-demand TLS permission block, the below example dem
 			resolves_to my-caddy-server.example.net
 			max_subdomain_depth 1
 			max_certs_per_domain 20
+			rate_limit 100 1h
+			per_domain_rate_limit 5 24h
 			permit_ip false
 			permit_local false
 			permit_all false
@@ -84,7 +86,15 @@ The same configuration can be represented in JSON. This is a config snippet rath
 						],
 						"resolves_to": [
 							"my-caddy-server.example.net"
-						]
+						],
+						"global_rate_limit": {
+							"limit": 100,
+							"duration": "1h"
+						},
+						"per_domain_rate_limit": {
+							"limit": 5,
+							"duration": "24h"
+						}
 					}
 				}
 			}
@@ -121,9 +131,17 @@ The same configuration can be represented in JSON. This is a config snippet rath
 - `max_certs_per_domain`
   Maximum number of unique approved names per domain. Default: -1 (no limit).
   Approval state is persisted in Caddy storage, so the limit survives restarts and is shared by multiple Caddy instances using the same storage backend.
+- `rate_limit`
+  Limit the total number of certificate approvals across all domains within a rolling time window.
+  Requires two arguments: `limit` (maximum number of approvals) and `duration` (the window length, e.g. `1h`, `30m`).
+  Only approved requests count against the limit. The check is applied early to avoid unnecessary DNS resolution for over-limit requests.
+- `per_domain_rate_limit`
+  Limit the number of certificate approvals per registrable domain (e.g. `example.com`) within a rolling time window.
+  Requires two arguments: `limit` and `duration`. Each registrable domain has its own independent counter.
+  Only approved requests count against the limit. Counters are held in memory only and reset when Caddy restarts.
 - `permit_ip`
   Allow a certificate to be issued when the name is a direct IP address (only useful for Caddy internal / self-signed certificates). Default: false.
-  When enabled, IP address names bypass all other policy checks (`deny_regexp`, `allow_regexp`, subdomain rules, `max_certs_per_domain`) and are evaluated only against `permit_local` and `resolves_to`.
+  When enabled, IP address names bypass all other policy checks (`deny_regexp`, `allow_regexp`, subdomain rules, `max_certs_per_domain`, rate limits) and are evaluated only against `permit_local` and `resolves_to`.
 - `permit_local`
   Allow a certificate to be issued to names that resolve to local, private, loopback, link-local, or unspecified addresses. Default: false.
 - `permit_all`
@@ -132,7 +150,7 @@ The same configuration can be represented in JSON. This is a config snippet rath
 ## Important Behavior Notes
 
 - This module is fail-secure: if a hostname does not satisfy the configured policy, it is denied. Conversely, a hostname must match all configured policies to be accepted.
-- The module requires at least one policy option to be configured unless `permit_all` is true. Accepted options are `allow_regexp`, `deny_regexp`, `allow_subdomain`, `deny_subdomain`, `resolves_to`, `max_subdomain_depth`, `max_certs_per_domain`, `permit_ip`, and `permit_local`.
+- The module requires at least one policy option to be configured unless `permit_all` is true. Accepted options are `allow_regexp`, `deny_regexp`, `allow_subdomain`, `deny_subdomain`, `resolves_to`, `max_subdomain_depth`, `max_certs_per_domain`, `rate_limit`, `per_domain_rate_limit`, `permit_ip`, and `permit_local`.
 - `permit_all` bypasses all policy checks for both hostnames and direct IP names.
 - Subdomain policies compare against the portion to the left of the domain, for example:
   `example.com` -> `""`, `www.example.com` -> `"www"`, `api.v2.example.com` -> `"api.v2"`.
@@ -142,6 +160,8 @@ The same configuration can be represented in JSON. This is a config snippet rath
 - Hostname approval uses exact per-name deduplication per domain in storage, so repeated requests for the same approved name do not consume the limit again.
 - The module keeps a short-lived 2-minute in-memory cache of domains that have reached `max_certs_per_domain` so that requests for already-full domains are rejected quickly without a storage read.
 - If `resolves_to` is configured, the requested name must already resolve successfully before it can be approved.
+- `rate_limit` and `per_domain_rate_limit` counters are in-memory only and are not shared across Caddy instances. Counts reset when Caddy restarts.
+- `per_domain_rate_limit` maintains one counter per approved registrable domain for the lifetime of the process. In deployments serving a very large number of unique domains, pairing it with `rate_limit` is recommended to bound the total number of tracked domains.
 
 ## Policy Order
 
@@ -149,7 +169,9 @@ For each requested certificate name, the module applies a policy with the follow
 
 - Direct IP names are denied unless `permit_ip` is enabled.
 - Direct IP names and resolved hostnames are denied if they use local, private, loopback, link-local, or unspecified IPs unless `permit_local` is enabled.
+- If `rate_limit` is configured, the global approval count is checked and hostnames over the limit are denied before DNS resolution.
 - If `max_certs_per_domain` is configured and the domain is cached as already full, the limit is rechecked immediately (fast rejection before more expensive checks).
+- If `per_domain_rate_limit` is configured, the per-domain approval count is checked and hostnames over the limit are denied before regexp and DNS checks.
 - Hostnames with label count exceeding `max_subdomain_depth` are denied.
 - Hostnames whose subdomain portion matches any configured `deny_subdomain` literal are denied.
 - If `allow_subdomain` is configured, the subdomain portion must match at least one configured `allow_subdomain` literal.
@@ -157,3 +179,4 @@ For each requested certificate name, the module applies a policy with the follow
 - If `allow_regexp` is configured, hostnames must match at least one configured `allow_regexp` pattern.
 - If `resolves_to` is configured, the resolved IPs for the requested hostname must match the IPs produced by the configured `resolves_to` targets.
 - If `max_certs_per_domain` is configured, the limit is authoritatively checked and the approval recorded in Caddy storage.
+- If `rate_limit` or `per_domain_rate_limit` is configured, the approval is recorded in the respective in-memory counter.

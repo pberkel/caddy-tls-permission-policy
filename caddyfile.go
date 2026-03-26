@@ -112,6 +112,32 @@ func (p *PermissionByPolicy) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 					return d.Errf("invalid boolean value for permit_all: %s", configVal[0])
 				}
 				p.PermitAll = permitAll
+			case "rate_limit":
+				if len(configVal) != 2 {
+					return d.Err("rate_limit requires exactly two arguments: limit and duration")
+				}
+				limit, err := strconv.Atoi(configVal[0])
+				if err != nil {
+					return d.Errf("invalid integer value for rate_limit limit: %s", configVal[0])
+				}
+				dur, err := caddy.ParseDuration(configVal[1])
+				if err != nil {
+					return d.Errf("invalid duration value for rate_limit: %s", configVal[1])
+				}
+				p.GlobalRateLimit = &RateLimit{Limit: limit, Duration: caddy.Duration(dur)}
+			case "per_domain_rate_limit":
+				if len(configVal) != 2 {
+					return d.Err("per_domain_rate_limit requires exactly two arguments: limit and duration")
+				}
+				limit, err := strconv.Atoi(configVal[0])
+				if err != nil {
+					return d.Errf("invalid integer value for per_domain_rate_limit limit: %s", configVal[0])
+				}
+				dur, err := caddy.ParseDuration(configVal[1])
+				if err != nil {
+					return d.Errf("invalid duration value for per_domain_rate_limit: %s", configVal[1])
+				}
+				p.PerDomainRateLimit = &RateLimit{Limit: limit, Duration: caddy.Duration(dur)}
 			default:
 				return d.Errf("unrecognized configuration parameter: %s", configKey)
 			}
@@ -154,6 +180,8 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 		len(p.ResolvesTo) == 0 &&
 		p.MaxSubdomainDepth == -1 &&
 		p.MaxCertsPerDomain == -1 &&
+		p.GlobalRateLimit == nil &&
+		p.PerDomainRateLimit == nil &&
 		!p.PermitIP &&
 		!p.PermitLocal {
 		return fmt.Errorf("at least one policy setting must be configured unless 'permit_all' is true")
@@ -216,6 +244,30 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 		p.dnsClient = &miekgdns.Client{Timeout: customDNSTimeout}
 	}
 
+	// Validate and initialize rate limit state.
+	if p.GlobalRateLimit != nil {
+		if p.GlobalRateLimit.Limit <= 0 {
+			return fmt.Errorf("global_rate_limit limit must be greater than 0, got %d", p.GlobalRateLimit.Limit)
+		}
+		if time.Duration(p.GlobalRateLimit.Duration) <= 0 {
+			return fmt.Errorf("global_rate_limit duration must be greater than 0")
+		}
+	}
+	if p.PerDomainRateLimit != nil {
+		if p.PerDomainRateLimit.Limit <= 0 {
+			return fmt.Errorf("per_domain_rate_limit limit must be greater than 0, got %d", p.PerDomainRateLimit.Limit)
+		}
+		if time.Duration(p.PerDomainRateLimit.Duration) <= 0 {
+			return fmt.Errorf("per_domain_rate_limit duration must be greater than 0")
+		}
+	}
+	p.rateLimiter = &rateLimitState{
+		globalLimit:    p.GlobalRateLimit,
+		perDomainLimit: p.PerDomainRateLimit,
+		domains:        make(map[string]*windowCounter),
+		now:            time.Now,
+	}
+
 	if c := p.logger.Check(zapcore.InfoLevel, "provisioned tls.permission.policy"); c != nil {
 		c.Write(
 			zap.Int("allow_regexp_count", len(p.AllowRegexp)),
@@ -229,6 +281,8 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 			zap.Bool("permit_ip", p.PermitIP),
 			zap.Bool("permit_local", p.PermitLocal),
 			zap.Bool("permit_all", p.PermitAll),
+			zap.Bool("global_rate_limit", p.GlobalRateLimit != nil),
+			zap.Bool("per_domain_rate_limit", p.PerDomainRateLimit != nil),
 		)
 	}
 
