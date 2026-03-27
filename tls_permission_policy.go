@@ -29,6 +29,8 @@ const defaultMaxCertsPerDomain = -1
 const approvalLimitCacheTTL = 2 * time.Minute
 const resolvedTargetsCacheTTL = 5 * time.Minute
 
+// PermissionByPolicy determines permission for a TLS certificate by
+// validating the name against a specified policy configuration.
 type PermissionByPolicy struct {
 	// Allow certificates for hostnames matching at least one regular expression pattern.
 	AllowRegexp []string `json:"allow_regexp,omitempty"`
