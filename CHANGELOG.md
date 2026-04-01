@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Renamed the `nameserver` configuration option to `resolvers` to conform to Caddy naming conventions. The JSON field has been updated from `nameserver` to `resolvers` accordingly.
+- Rewrote the Policy Options section of the README as a reference table and converted the Policy Order section to a numbered list.
+- Added Apache 2.0 license banner to all source files.
 
 ---
 
