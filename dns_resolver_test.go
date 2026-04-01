@@ -98,7 +98,7 @@ func TestCertificateAllowedDNS(t *testing.T) {
 		}
 	})
 
-	t.Run("uses configured nameserver for hostname resolution", func(t *testing.T) {
+	t.Run("uses configured resolver for hostname resolution", func(t *testing.T) {
 		nameserver := startTestDNSServer(t, map[string][]netip.Addr{
 			"api.example.com.": {netip.MustParseAddr("203.0.113.44")},
 		}, nil)
@@ -107,16 +107,16 @@ func TestCertificateAllowedDNS(t *testing.T) {
 		policy.AllowRegexp = []string{`^api\.example\.com$`}
 		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
 		policy.PermitLocal = true
-		policy.Nameserver = []string{nameserver}
+		policy.Resolvers = []string{nameserver}
 		policy.dnsClient = &miekgdns.Client{Timeout: 2 * time.Second}
 		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{})
 
 		if err := policy.CertificateAllowed(context.Background(), "api.example.com"); err != nil {
-			t.Fatalf("expected allow using nameserver-backed resolution, got %v", err)
+			t.Fatalf("expected allow using resolver-backed resolution, got %v", err)
 		}
 	})
 
-	t.Run("follows CNAME records with configured nameserver", func(t *testing.T) {
+	t.Run("follows CNAME records with configured resolver", func(t *testing.T) {
 		nameserver := startTestDNSServer(t, map[string][]netip.Addr{
 			"target.example.com.": {netip.MustParseAddr("203.0.113.55")},
 		}, map[string]string{
@@ -127,12 +127,12 @@ func TestCertificateAllowedDNS(t *testing.T) {
 		policy.AllowRegexp = []string{`^alias\.example\.com$`}
 		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
 		policy.PermitLocal = true
-		policy.Nameserver = []string{nameserver}
+		policy.Resolvers = []string{nameserver}
 		policy.dnsClient = &miekgdns.Client{Timeout: 2 * time.Second}
 		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{})
 
 		if err := policy.CertificateAllowed(context.Background(), "alias.example.com"); err != nil {
-			t.Fatalf("expected allow using nameserver-backed CNAME resolution, got %v", err)
+			t.Fatalf("expected allow using resolver-backed CNAME resolution, got %v", err)
 		}
 	})
 }

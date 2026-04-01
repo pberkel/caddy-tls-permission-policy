@@ -77,8 +77,8 @@ func (p *PermissionByPolicy) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				p.DenySubdomain = append(p.DenySubdomain, configVal...)
 			case "resolves_to":
 				p.ResolvesTo = append(p.ResolvesTo, configVal...)
-			case "nameserver":
-				p.Nameserver = append(p.Nameserver, configVal...)
+			case "resolvers":
+				p.Resolvers = append(p.Resolvers, configVal...)
 			case "max_subdomain_depth":
 				if len(configVal) > 1 {
 					return d.Err("too many arguments supplied to max_subdomain_depth")
@@ -212,26 +212,26 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 		p.denyRegexp = append(p.denyRegexp, re)
 	}
 
-	// replace ResolvesTo & Nameserver placeholder values if present
+	// replace ResolvesTo & Resolvers placeholder values if present
 	for i, value := range p.ResolvesTo {
 		p.ResolvesTo[i] = replacer.ReplaceAll(value, "")
 	}
-	for i, value := range p.Nameserver {
+	for i, value := range p.Resolvers {
 		value = replacer.ReplaceAll(value, "")
 		host, port, err := net.SplitHostPort(value)
 		if err != nil {
-			return fmt.Errorf("invalid nameserver %q: must be in host:port form", value)
+			return fmt.Errorf("invalid resolver %q: must be in host:port form", value)
 		}
 		if host == "" {
-			return fmt.Errorf("invalid nameserver %q: host must not be empty", value)
+			return fmt.Errorf("invalid resolver %q: host must not be empty", value)
 		}
 		portNum, err := strconv.ParseUint(port, 10, 16)
 		if err != nil || portNum == 0 {
-			return fmt.Errorf("invalid nameserver %q: port must be a number between 1 and 65535", value)
+			return fmt.Errorf("invalid resolver %q: port must be a number between 1 and 65535", value)
 		}
-		p.Nameserver[i] = value
+		p.Resolvers[i] = value
 	}
-	if len(p.Nameserver) > 0 {
+	if len(p.Resolvers) > 0 {
 		p.dnsClient = &miekgdns.Client{Timeout: customDNSTimeout}
 	}
 
@@ -265,7 +265,7 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 			zap.Int("allow_subdomain_count", len(p.AllowSubdomain)),
 			zap.Int("deny_subdomain_count", len(p.DenySubdomain)),
 			zap.Int("resolves_to_count", len(p.ResolvesTo)),
-			zap.Int("nameserver_count", len(p.Nameserver)),
+			zap.Int("resolvers_count", len(p.Resolvers)),
 			zap.Int("max_subdomain_depth", p.MaxSubdomainDepth),
 			zap.Int("max_certs_per_domain", p.MaxCertsPerDomain),
 			zap.Bool("permit_ip", p.PermitIP),

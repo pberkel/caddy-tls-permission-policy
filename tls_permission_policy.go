@@ -43,7 +43,7 @@ type PermissionByPolicy struct {
 	// Allow certificates for hostnames that resolve to a specified hostname or IP address.
 	ResolvesTo []string `json:"resolves_to,omitempty"`
 	// One or more optional name server addresses used to resolve DNS queries, each in HOST:PORT format.
-	Nameserver []string `json:"nameserver,omitempty"`
+	Resolvers []string `json:"resolvers,omitempty"`
 	// The maximum number of unique names approved per registrable domain. Default -1 no limit.
 	MaxCertsPerDomain int `json:"max_certs_per_domain"`
 	// Raw string value for max_certs_per_domain; may contain Caddy placeholders resolved at provisioning time.

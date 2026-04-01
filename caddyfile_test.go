@@ -202,12 +202,12 @@ func TestProvision(t *testing.T) {
 		}
 	})
 
-	t.Run("fails when nameserver is not in host:port form", func(t *testing.T) {
+	t.Run("fails when resolver is not in host:port form", func(t *testing.T) {
 		policy := &PermissionByPolicy{}
 		policy.MaxSubdomainDepth = -1
 		policy.MaxCertsPerDomain = -1
 		policy.AllowRegexp = []string{`^.*\.example\.com$`}
-		policy.Nameserver = []string{"203.0.113.12"}
+		policy.Resolvers = []string{"203.0.113.12"}
 		ctx, cancel := newProvisionContext(t)
 		defer cancel()
 
@@ -217,12 +217,12 @@ func TestProvision(t *testing.T) {
 		}
 	})
 
-	t.Run("configures custom dns client timeout when nameserver is set", func(t *testing.T) {
+	t.Run("configures custom dns client timeout when resolvers is set", func(t *testing.T) {
 		policy := &PermissionByPolicy{}
 		policy.MaxSubdomainDepth = -1
 		policy.MaxCertsPerDomain = -1
 		policy.AllowRegexp = []string{`^.*\.example\.com$`}
-		policy.Nameserver = []string{"203.0.113.12:53"}
+		policy.Resolvers = []string{"203.0.113.12:53"}
 		ctx, cancel := newProvisionContext(t)
 		defer cancel()
 
@@ -252,7 +252,7 @@ func TestUnmarshalCaddyfileAccumulatesRepeatedDirectives(t *testing.T) {
 		deny_subdomain private
 		resolves_to 203.0.113.10
 		resolves_to 203.0.113.11
-		nameserver 203.0.113.12:53
+		resolvers 203.0.113.12:53
 		permit_all false
 	}
 	`)
@@ -276,8 +276,8 @@ func TestUnmarshalCaddyfileAccumulatesRepeatedDirectives(t *testing.T) {
 	if len(policy.ResolvesTo) != 2 {
 		t.Fatalf("expected 2 resolves_to entries, got %d", len(policy.ResolvesTo))
 	}
-	if len(policy.Nameserver) != 1 {
-		t.Fatalf("expected 1 nameserver entry, got %d", len(policy.Nameserver))
+	if len(policy.Resolvers) != 1 {
+		t.Fatalf("expected 1 resolvers entry, got %d", len(policy.Resolvers))
 	}
 	if policy.PermitAll {
 		t.Fatal("expected permit_all to be false")

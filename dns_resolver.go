@@ -45,7 +45,7 @@ func (p *PermissionByPolicy) resolveAddrs(ctx context.Context, name string) ([]n
 	return resolved, nil
 }
 
-// ResolveAddrsWithClient resolves a hostname using the configured nameserver list.
+// ResolveAddrsWithClient resolves a hostname using the configured resolvers list.
 func (p *PermissionByPolicy) resolveAddrsWithClient(ctx context.Context, name string) ([]netip.Addr, error) {
 	questionName := miekgdns.Fqdn(name)
 	resolved := make(map[netip.Addr]struct{})
@@ -55,24 +55,24 @@ func (p *PermissionByPolicy) resolveAddrsWithClient(ctx context.Context, name st
 
 	for depth := 0; depth < maxCNAMEChainDepth; depth++ {
 		if _, seen := seenNames[questionName]; seen {
-			return nil, fmt.Errorf("resolving %q with configured nameserver(s): detected CNAME loop at %q", name, strings.TrimSuffix(questionName, "."))
+			return nil, fmt.Errorf("resolving %q with configured resolver(s): detected CNAME loop at %q", name, strings.TrimSuffix(questionName, "."))
 		}
 		seenNames[questionName] = struct{}{}
 
 		cnameTarget = ""
 		clear(resolved)
 
-		// Query every configured nameserver for both record types. If one nameserver
+		// Query every configured resolver for both record types. If one resolver
 		// returns a CNAME and another returns A/AAAA records for the same name, the
 		// A/AAAA records take precedence (resolved is non-empty, loop breaks early and
-		// the CNAME is not followed). All configured nameservers are expected to return
+		// the CNAME is not followed). All configured resolvers are expected to return
 		// consistent records for a given name.
-		for _, nameserver := range p.Nameserver {
+		for _, resolver := range p.Resolvers {
 			for _, qtype := range []uint16{miekgdns.TypeA, miekgdns.TypeAAAA} {
 				msg := &miekgdns.Msg{}
 				msg.SetQuestion(questionName, qtype)
 
-				response, _, err := p.dnsClient.ExchangeContext(ctx, msg, nameserver)
+				response, _, err := p.dnsClient.ExchangeContext(ctx, msg, resolver)
 				if err != nil {
 					lastErr = err
 					continue
@@ -117,7 +117,7 @@ func (p *PermissionByPolicy) resolveAddrsWithClient(ctx context.Context, name st
 
 	if len(resolved) == 0 {
 		if lastErr != nil {
-			return nil, fmt.Errorf("resolving %q with configured nameserver(s): %w", name, lastErr)
+			return nil, fmt.Errorf("resolving %q with configured resolver(s): %w", name, lastErr)
 		}
 		return nil, fmt.Errorf("%w: domain did not resolve to any IP addresses", caddytls.ErrPermissionDenied)
 	}
@@ -130,7 +130,7 @@ func (p *PermissionByPolicy) resolveAddrsWithClient(ctx context.Context, name st
 		c.Write(
 			zap.String("name", name),
 			zap.Any("resolved_addrs", addrs),
-			zap.Strings("nameservers", append([]string(nil), p.Nameserver...)),
+			zap.Strings("resolvers", append([]string(nil), p.Resolvers...)),
 			zap.Bool("custom_resolver", true),
 		)
 	}
