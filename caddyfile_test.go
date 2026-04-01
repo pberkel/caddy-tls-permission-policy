@@ -215,7 +215,7 @@ func TestProvision(t *testing.T) {
 		}
 	})
 
-	t.Run("fails when resolver is not in host:port form", func(t *testing.T) {
+	t.Run("defaults to port 53 when resolver has no port", func(t *testing.T) {
 		policy := &PermissionByPolicy{}
 		policy.MaxSubdomainDepth = -1
 		policy.MaxCertsPerDomain = -1
@@ -224,9 +224,11 @@ func TestProvision(t *testing.T) {
 		ctx, cancel := newProvisionContext(t)
 		defer cancel()
 
-		err := policy.Provision(ctx)
-		if err == nil {
-			t.Fatal("expected provision error, got nil")
+		if err := policy.Provision(ctx); err != nil {
+			t.Fatalf("expected provision success, got %v", err)
+		}
+		if policy.Resolvers[0] != "203.0.113.12:53" {
+			t.Fatalf("expected resolver normalised to 203.0.113.12:53, got %s", policy.Resolvers[0])
 		}
 	})
 

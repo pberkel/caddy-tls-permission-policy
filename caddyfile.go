@@ -234,7 +234,10 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 		value = replacer.ReplaceAll(value, "")
 		host, port, err := net.SplitHostPort(value)
 		if err != nil {
-			return fmt.Errorf("invalid resolver %q: must be in host:port form", value)
+			// No port specified — treat entire value as host and default to port 53.
+			host = value
+			port = "53"
+			value = net.JoinHostPort(host, port)
 		}
 		if host == "" {
 			return fmt.Errorf("invalid resolver %q: host must not be empty", value)
