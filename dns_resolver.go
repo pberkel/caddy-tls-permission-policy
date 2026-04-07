@@ -33,28 +33,46 @@ import (
 const maxCNAMEChainDepth = 8
 const resolvedTargetsCacheTTL = 5 * time.Minute
 
-// resolvedTargetsCache holds the resolved IP addresses of all configured
-// resolves_to targets with a TTL-based expiry. Concurrent cache misses are
-// coalesced via a singleflight group so that only one DNS resolution runs at a time.
-type resolvedTargetsCache struct {
-	mu     sync.RWMutex
-	sf     singleflight.Group
-	addrs  map[netip.Addr]struct{}
-	expiry time.Time
-	now    func() time.Time
+// resolvedChain holds the full DNS resolution chain for a hostname: all names
+// encountered during resolution (the initial query name plus each CNAME target)
+// and the final resolved IP addresses. Names are normalized: lowercased with no
+// trailing dot.
+//
+// When resolved via the system resolver, names is always empty because
+// net.Resolver does not expose intermediate CNAME records.
+type resolvedChain struct {
+	names []string
+	addrs []netip.Addr
 }
 
-// ResolveAddrs resolves a hostname or literal IP into one or more IP addresses.
-func (p *PermissionByPolicy) resolveAddrs(ctx context.Context, name string) ([]netip.Addr, error) {
+// resolvedTargetsCache holds the resolved members of all configured resolves_to
+// targets with a TTL-based expiry. Members is a mixed set of normalized hostname
+// strings (collected from DNS name chains) and IP address strings, covering the
+// full resolution chain of each configured target. Concurrent cache misses are
+// coalesced via a singleflight group so that only one DNS resolution runs at a time.
+type resolvedTargetsCache struct {
+	mu      sync.RWMutex
+	sf      singleflight.Group
+	members map[string]struct{}
+	expiry  time.Time
+	now     func() time.Time
+}
+
+// resolveAddrs resolves a hostname or literal IP into a resolvedChain.
+// earlyExit is an optional set of allowed members: when resolving via the
+// custom DNS client, resolution stops as soon as a visited name is found in
+// earlyExit, returning a partial chain with no addrs. Pass nil to always
+// resolve to completion.
+func (p *PermissionByPolicy) resolveAddrs(ctx context.Context, name string, earlyExit map[string]struct{}) (*resolvedChain, error) {
 	if addr, err := netip.ParseAddr(name); err == nil {
 		if c := p.logger.Check(zapcore.DebugLevel, "resolved literal IP address"); c != nil {
 			c.Write(zap.String("name", name), zap.String("ip", addr.String()))
 		}
-		return []netip.Addr{addr}, nil
+		return &resolvedChain{addrs: []netip.Addr{addr}}, nil
 	}
 
 	if p.dnsClient != nil {
-		return p.resolveAddrsWithClient(ctx, name)
+		return p.resolveChainWithClient(ctx, name, earlyExit)
 	}
 
 	resolved, err := p.lookupNetIP(ctx, "ip", name)
@@ -71,12 +89,17 @@ func (p *PermissionByPolicy) resolveAddrs(ctx context.Context, name string) ([]n
 		c.Write(zap.String("name", name), zap.Any("resolved_addrs", resolved))
 	}
 
-	return resolved, nil
+	return &resolvedChain{addrs: resolved}, nil
 }
 
-// ResolveAddrsWithClient resolves a hostname using the configured resolvers list.
-func (p *PermissionByPolicy) resolveAddrsWithClient(ctx context.Context, name string) ([]netip.Addr, error) {
+// resolveChainWithClient resolves a hostname using the configured resolvers list,
+// collecting all DNS names encountered (the initial query name plus each CNAME
+// target) and the final IP addresses into a resolvedChain. If earlyExit is
+// non-nil, resolution stops as soon as a visited name is found in that set,
+// returning a partial chain without addrs populated.
+func (p *PermissionByPolicy) resolveChainWithClient(ctx context.Context, name string, earlyExit map[string]struct{}) (*resolvedChain, error) {
 	questionName := miekgdns.Fqdn(name)
+	chain := &resolvedChain{}
 	resolved := make(map[netip.Addr]struct{})
 	seenNames := make(map[string]struct{}, maxCNAMEChainDepth)
 	var lastErr error
@@ -87,6 +110,15 @@ func (p *PermissionByPolicy) resolveAddrsWithClient(ctx context.Context, name st
 			return nil, fmt.Errorf("resolving %q with configured resolver(s): detected CNAME loop at %q", name, strings.TrimSuffix(questionName, "."))
 		}
 		seenNames[questionName] = struct{}{}
+		normalizedName := strings.TrimSuffix(questionName, ".")
+		chain.names = append(chain.names, normalizedName)
+
+		// If the current name already matches an allowed target, there is no need
+		// to issue further DNS queries. Return the partial chain; checkResolvesTo
+		// will find the matching name and allow the request.
+		if _, ok := earlyExit[normalizedName]; ok {
+			return chain, nil
+		}
 
 		cnameTarget = ""
 		clear(resolved)
@@ -153,60 +185,71 @@ func (p *PermissionByPolicy) resolveAddrsWithClient(ctx context.Context, name st
 		return nil, fmt.Errorf("%w: domain did not resolve to any IP addresses", caddytls.ErrPermissionDenied)
 	}
 
-	addrs := make([]netip.Addr, 0, len(resolved))
+	chain.addrs = make([]netip.Addr, 0, len(resolved))
 	for addr := range resolved {
-		addrs = append(addrs, addr)
+		chain.addrs = append(chain.addrs, addr)
 	}
 	if c := p.logger.Check(zapcore.DebugLevel, "resolved hostname addresses"); c != nil {
 		c.Write(
 			zap.String("name", name),
-			zap.Any("resolved_addrs", addrs),
+			zap.Any("resolved_addrs", chain.addrs),
 			zap.Strings("resolvers", append([]string(nil), p.Resolvers...)),
 			zap.Bool("custom_resolver", true),
 		)
 	}
 
-	return addrs, nil
+	return chain, nil
 }
 
-// CheckResolvesTo ensures the resolved name addresses match one of the configured targets.
-func (p *PermissionByPolicy) checkResolvesTo(ctx context.Context, resolved []netip.Addr) error {
-	allowedTargets, err := p.allowedTargetAddrs(ctx)
+// checkResolvesTo ensures the resolved name chain shares at least one member
+// with the set of allowed target members. A match on any chain element —
+// either an intermediate DNS name or a final IP address — is sufficient.
+// This allows matching across geo-DNS boundaries: if the incoming hostname
+// and a resolves_to target share a common intermediate CNAME (e.g. a CDN
+// hostname), the check passes even if their final IPs differ.
+func (p *PermissionByPolicy) checkResolvesTo(ctx context.Context, chain *resolvedChain) error {
+	allowed, err := p.allowedTargetMembers(ctx)
 	if err != nil {
 		return err
 	}
 	if c := p.logger.Check(zapcore.DebugLevel, "evaluated resolves_to targets"); c != nil {
 		c.Write(
-			zap.Any("resolved_addrs", resolved),
-			zap.Any("allowed_targets", allowedTargets),
+			zap.Strings("resolved_names", chain.names),
+			zap.Any("resolved_addrs", chain.addrs),
+			zap.Any("allowed_members", allowed),
 		)
 	}
 
-	if len(resolved) == 0 {
+	if len(chain.names) == 0 && len(chain.addrs) == 0 {
 		return fmt.Errorf("%w: no resolved addresses to validate against resolves_to", caddytls.ErrPermissionDenied)
 	}
 
-	for _, addr := range resolved {
-		if _, ok := allowedTargets[addr]; !ok {
-			return fmt.Errorf("%w: domain resolved to disallowed target %s", caddytls.ErrPermissionDenied, addr)
+	for _, name := range chain.names {
+		if _, ok := allowed[name]; ok {
+			return nil
+		}
+	}
+	for _, addr := range chain.addrs {
+		if _, ok := allowed[addr.String()]; ok {
+			return nil
 		}
 	}
 
-	return nil
+	return fmt.Errorf("%w: domain did not resolve to any configured resolves_to target", caddytls.ErrPermissionDenied)
 }
 
-// allowedTargetAddrs returns the cached set of allowed target IP addresses, resolving
+// allowedTargetMembers returns the cached set of allowed target members, resolving
 // all ResolvesTo targets if the cache is absent or expired. Concurrent cache misses are
 // coalesced via a singleflight group so that only one resolution runs at a time.
-func (p *PermissionByPolicy) allowedTargetAddrs(ctx context.Context) (map[netip.Addr]struct{}, error) {
+func (p *PermissionByPolicy) allowedTargetMembers(ctx context.Context) (map[string]struct{}, error) {
 	cache := p.resolvedTargets
 
 	// Fast path: valid cache entry.
 	cache.mu.RLock()
-	if cache.addrs != nil && cache.now().Before(cache.expiry) {
-		addrs := cache.addrs
+	if cache.members != nil && cache.now().Before(cache.expiry) {
+		members := cache.members
 		cache.mu.RUnlock()
-		return addrs, nil
+		return members, nil
 	}
 	cache.mu.RUnlock()
 
@@ -215,34 +258,39 @@ func (p *PermissionByPolicy) allowedTargetAddrs(ctx context.Context) (map[netip.
 	v, err, _ := cache.sf.Do("resolve", func() (any, error) {
 		// Double-check under write lock: a previous flight may have already refreshed.
 		cache.mu.Lock()
-		if cache.addrs != nil && cache.now().Before(cache.expiry) {
-			addrs := cache.addrs
+		if cache.members != nil && cache.now().Before(cache.expiry) {
+			members := cache.members
 			cache.mu.Unlock()
-			return addrs, nil
+			return members, nil
 		}
 		cache.mu.Unlock()
 
 		// Resolve all targets outside the lock so readers are not blocked during DNS I/O.
-		addrs := make(map[netip.Addr]struct{})
+		// Targets are always resolved to completion (nil earlyExit) to build the full
+		// members set used by checkResolvesTo and earlyExit for incoming hostnames.
+		members := make(map[string]struct{})
 		for _, target := range p.ResolvesTo {
-			targetAddrs, err := p.resolveAddrs(ctx, target)
+			chain, err := p.resolveAddrs(ctx, target, nil)
 			if err != nil {
 				return nil, fmt.Errorf("%w: resolving resolves_to target %q: %w", caddytls.ErrPermissionDenied, target, err)
 			}
-			for _, addr := range targetAddrs {
-				addrs[addr] = struct{}{}
+			for _, name := range chain.names {
+				members[name] = struct{}{}
+			}
+			for _, addr := range chain.addrs {
+				members[addr.String()] = struct{}{}
 			}
 		}
 
 		// Store result under write lock.
 		cache.mu.Lock()
-		cache.addrs = addrs
+		cache.members = members
 		cache.expiry = cache.now().Add(resolvedTargetsCacheTTL)
 		cache.mu.Unlock()
-		return addrs, nil
+		return members, nil
 	})
 	if err != nil {
 		return nil, err
 	}
-	return v.(map[netip.Addr]struct{}), nil
+	return v.(map[string]struct{}), nil
 }

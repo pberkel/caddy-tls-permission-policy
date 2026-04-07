@@ -26,7 +26,7 @@ Configure the module in an on-demand TLS permission block. The example below dem
 			deny_regexp ^(blocked|secret)\.example\.com$
 			allow_subdomain www api ""
 			deny_subdomain internal private
-			resolvers 8.8.8.8:53
+			resolvers 8.8.8.8
 			resolves_to my-caddy-server.example.net
 			max_subdomain_depth 1
 			permit_ip false
@@ -80,7 +80,7 @@ The same configuration can be represented in JSON. This is a config snippet rath
 						"permit_ip": false,
 						"permit_local": false,
 						"resolvers": [
-							"8.8.8.8:53"
+							"8.8.8.8"
 						],
 						"resolves_to": [
 							"my-caddy-server.example.net"

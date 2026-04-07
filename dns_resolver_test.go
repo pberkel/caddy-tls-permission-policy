@@ -68,7 +68,7 @@ func TestCertificateAllowedDNS(t *testing.T) {
 		}
 	})
 
-	t.Run("denies regex match when any resolved address is outside resolves_to targets", func(t *testing.T) {
+	t.Run("denies when no resolved address matches resolves_to targets", func(t *testing.T) {
 		policy := newTestPolicy(t)
 		policy.AllowRegexp = []string{`^.*\.example\.com$`}
 		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
@@ -147,6 +147,147 @@ func TestCertificateAllowedDNS(t *testing.T) {
 
 		if err := policy.CertificateAllowed(context.Background(), "alias.example.com"); err != nil {
 			t.Fatalf("expected allow using resolver-backed CNAME resolution, got %v", err)
+		}
+	})
+}
+
+func TestCheckResolvesTo(t *testing.T) {
+	t.Run("passes when incoming chain name matches allowed member", func(t *testing.T) {
+		policy := newTestPolicy(t)
+		policy.ResolvesTo = []string{"proxy.example.com"}
+		policy.resolvedTargets = &resolvedTargetsCache{
+			members: map[string]struct{}{
+				"proxy.example.com": {},
+				"203.0.113.10":      {},
+			},
+			expiry: time.Now().Add(time.Hour),
+			now:    time.Now,
+		}
+
+		// Incoming hostname CNAMEs to proxy.example.com but resolves to a different
+		// IP (simulating geo-DNS). The CNAME name match should be sufficient.
+		chain := &resolvedChain{
+			names: []string{"svc.example.com", "proxy.example.com"},
+			addrs: []netip.Addr{netip.MustParseAddr("203.0.113.99")},
+		}
+
+		if err := policy.checkResolvesTo(context.Background(), chain); err != nil {
+			t.Fatalf("expected allow via CNAME name match, got %v", err)
+		}
+	})
+
+	t.Run("passes when incoming chain IP matches allowed member", func(t *testing.T) {
+		policy := newTestPolicy(t)
+		policy.ResolvesTo = []string{"target.internal"}
+		policy.resolvedTargets = &resolvedTargetsCache{
+			members: map[string]struct{}{
+				"target.internal": {},
+				"203.0.113.10":    {},
+			},
+			expiry: time.Now().Add(time.Hour),
+			now:    time.Now,
+		}
+
+		chain := &resolvedChain{
+			addrs: []netip.Addr{netip.MustParseAddr("203.0.113.10")},
+		}
+
+		if err := policy.checkResolvesTo(context.Background(), chain); err != nil {
+			t.Fatalf("expected allow via IP match, got %v", err)
+		}
+	})
+
+	t.Run("fails when no chain element matches allowed members", func(t *testing.T) {
+		policy := newTestPolicy(t)
+		policy.ResolvesTo = []string{"proxy.example.com"}
+		policy.resolvedTargets = &resolvedTargetsCache{
+			members: map[string]struct{}{
+				"proxy.example.com": {},
+				"203.0.113.10":      {},
+			},
+			expiry: time.Now().Add(time.Hour),
+			now:    time.Now,
+		}
+
+		chain := &resolvedChain{
+			names: []string{"svc.example.com", "other.example.com"},
+			addrs: []netip.Addr{netip.MustParseAddr("203.0.113.99")},
+		}
+
+		err := policy.checkResolvesTo(context.Background(), chain)
+		if !errors.Is(err, caddytls.ErrPermissionDenied) {
+			t.Fatalf("expected permission denied, got %v", err)
+		}
+	})
+}
+
+func TestCertificateAllowedCNAMEResolvesTo(t *testing.T) {
+	t.Run("allows when incoming hostname CNAMEs to resolves_to target", func(t *testing.T) {
+		nameserver := startTestDNSServer(t, map[string][]netip.Addr{
+			"proxy.example.com.": {netip.MustParseAddr("203.0.113.10")},
+		}, map[string]string{
+			"svc.example.com.": "proxy.example.com.",
+		})
+
+		policy := newTestPolicy(t)
+		policy.AllowRegexp = []string{`^svc\.example\.com$`}
+		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
+		policy.ResolvesTo = []string{"proxy.example.com"}
+		policy.PermitLocal = true
+		policy.Resolvers = []string{nameserver}
+		policy.dnsClient = &miekgdns.Client{Timeout: 2 * time.Second}
+
+		// svc.example.com → CNAME proxy.example.com → 203.0.113.10
+		// target chain: names=["proxy.example.com"], addrs=[203.0.113.10]
+		// incoming chain: names=["svc.example.com","proxy.example.com"], addrs=[203.0.113.10]
+		// "proxy.example.com" is in allowed members → pass
+		if err := policy.CertificateAllowed(context.Background(), "svc.example.com"); err != nil {
+			t.Fatalf("expected allow via CNAME name match, got %v", err)
+		}
+	})
+
+	t.Run("allows when incoming hostname and target share intermediate CNAME", func(t *testing.T) {
+		// Both svc.example.com and proxy.example.com CNAME to cdn.shared.com.
+		nameserver := startTestDNSServer(t, map[string][]netip.Addr{
+			"cdn.shared.com.": {netip.MustParseAddr("203.0.113.50")},
+		}, map[string]string{
+			"proxy.example.com.": "cdn.shared.com.",
+			"svc.example.com.":   "cdn.shared.com.",
+		})
+
+		policy := newTestPolicy(t)
+		policy.AllowRegexp = []string{`^svc\.example\.com$`}
+		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
+		policy.ResolvesTo = []string{"proxy.example.com"}
+		policy.PermitLocal = true
+		policy.Resolvers = []string{nameserver}
+		policy.dnsClient = &miekgdns.Client{Timeout: 2 * time.Second}
+
+		// target chain: names=["proxy.example.com","cdn.shared.com"], addrs=[203.0.113.50]
+		// incoming chain: names=["svc.example.com","cdn.shared.com"], addrs=[203.0.113.50]
+		// "cdn.shared.com" is in allowed members → pass
+		if err := policy.CertificateAllowed(context.Background(), "svc.example.com"); err != nil {
+			t.Fatalf("expected allow via shared intermediate CNAME, got %v", err)
+		}
+	})
+
+	t.Run("denies when incoming hostname shares no chain element with resolves_to target", func(t *testing.T) {
+		nameserver := startTestDNSServer(t, map[string][]netip.Addr{
+			"proxy.example.com.": {netip.MustParseAddr("203.0.113.10")},
+			"other.example.com.": {netip.MustParseAddr("203.0.113.99")},
+		}, nil)
+
+		policy := newTestPolicy(t)
+		policy.AllowRegexp = []string{`^other\.example\.com$`}
+		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
+		policy.ResolvesTo = []string{"proxy.example.com"}
+		policy.PermitLocal = true
+		policy.Resolvers = []string{nameserver}
+		policy.dnsClient = &miekgdns.Client{Timeout: 2 * time.Second}
+
+		err := policy.CertificateAllowed(context.Background(), "other.example.com")
+		if !errors.Is(err, caddytls.ErrPermissionDenied) {
+			t.Fatalf("expected permission denied, got %v", err)
 		}
 	})
 }

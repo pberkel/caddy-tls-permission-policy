@@ -66,8 +66,8 @@ type PermissionByPolicy struct {
 	denyRegexp        []*regexp.Regexp                                            `json:"-"`
 	allowSubdomainSet map[string]struct{}                                         `json:"-"`
 	denySubdomainSet  map[string]struct{}                                         `json:"-"`
-	lookupNetIP     func(context.Context, string, string) ([]netip.Addr, error) `json:"-"`
-	resolvedTargets *resolvedTargetsCache                                       `json:"-"`
+	lookupNetIP       func(context.Context, string, string) ([]netip.Addr, error) `json:"-"`
+	resolvedTargets   *resolvedTargetsCache                                       `json:"-"`
 }
 
 // CertificateAllowed evaluates the configured policy for a requested certificate name.
@@ -89,7 +89,7 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 			return fmt.Errorf("%w: IP address is local", caddytls.ErrPermissionDenied)
 		}
 		if len(p.ResolvesTo) > 0 {
-			if err := p.checkResolvesTo(ctx, []netip.Addr{addr}); err != nil {
+			if err := p.checkResolvesTo(ctx, &resolvedChain{addrs: []netip.Addr{addr}}); err != nil {
 				return err
 			}
 		}
@@ -113,23 +113,37 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 	// DNS resolution is required in two cases: when permit_local is false (to
 	// reject names that resolve to local IPs) and when resolves_to is configured
 	// (to validate the name resolves to the expected targets).
-	var resolvedName []netip.Addr
+	var resolvedName *resolvedChain
 	if !p.PermitLocal || len(p.ResolvesTo) > 0 {
+		// Pre-fetch the allowed target members so that resolution of the incoming
+		// hostname can terminate early as soon as a visited CNAME name matches.
+		// When a CNAME name match triggers early exit, chain.addrs will be empty
+		// and the permit_local IP check below is skipped — this is intentional,
+		// since the hostname is already matched against an explicitly trusted target.
+		var earlyExit map[string]struct{}
+		if len(p.ResolvesTo) > 0 {
+			var err error
+			earlyExit, err = p.allowedTargetMembers(ctx)
+			if err != nil {
+				return err
+			}
+		}
+
 		var err error
-		resolvedName, err = p.resolveAddrs(ctx, name)
+		resolvedName, err = p.resolveAddrs(ctx, name, earlyExit)
 		if err != nil {
 			return fmt.Errorf("%w: resolving name %q: %w", caddytls.ErrPermissionDenied, name, err)
 		}
 
 		if !p.PermitLocal {
-			for _, addr := range resolvedName {
+			for _, addr := range resolvedName.addrs {
 				if isLocalIP(addr) {
 					return fmt.Errorf("%w: name resolves to local IP %s", caddytls.ErrPermissionDenied, addr)
 				}
 			}
 		}
 		// ResolvesTo policy enforcement requires expensive DNS lookups,
-		// So the code to check will execute after less-expensive policy enforcement.
+		// so the code to check will execute after less-expensive policy enforcement.
 	}
 
 	// Determine the effective domain (from the public suffix list)
