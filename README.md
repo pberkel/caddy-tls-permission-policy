@@ -99,7 +99,7 @@ The same configuration can be represented in JSON. This is a config snippet rath
 | `deny_regexp` | `pattern...` | — | Deny hostnames matching any regular expression. Patterns are matched against the normalized hostname. |
 | `allow_subdomain` | `label...` | — | Allow hostnames whose subdomain portion exactly matches one of these literals. Use `""` to match the domain apex (e.g. `example.com`). Values are normalized to lowercase at provisioning time. |
 | `deny_subdomain` | `label...` | — | Deny hostnames whose subdomain portion exactly matches one of these literals. Use `""` to match the domain apex. Values are normalized to lowercase at provisioning time. |
-| `resolves_to` | `target...` | — | Allow only hostnames whose resolved IPs are all present in the set produced by these targets (hostnames or IPs). Resolved target IPs are cached in memory for 5 minutes. |
+| `resolves_to` | `target...` | — | Allow only hostnames whose DNS resolution chain shares at least one element — an intermediate CNAME name or final IP address — with the chains produced by resolving these targets (hostnames or literal IPs). When `resolvers` is configured, intermediate CNAME names are collected and matched; without `resolvers` the system resolver is used and only IP addresses are compared. Resolved target chains are cached in memory for 5 minutes. |
 | `resolvers` | `HOST\|HOST:PORT...` | system | Custom DNS resolvers used for hostname resolution instead of the system resolver. Port defaults to `53` when omitted. |
 | `max_subdomain_depth` | `integer` | `-1` (no limit) | Maximum subdomain label depth to the left of the registrable domain. `example.com` = 0, `www.example.com` = 1, `api.v2.example.com` = 2. Note: many ACME providers enforce an internal limit of 10 labels. Supports Caddy [placeholders](https://caddyserver.com/docs/conventions#placeholders). |
 | `permit_ip` | `bool` | `false` | Allow certificates for direct IP address names. When enabled, IP names bypass regexp and subdomain checks, and are evaluated only against `permit_local` and `resolves_to`. |
@@ -115,7 +115,7 @@ The same configuration can be represented in JSON. This is a config snippet rath
 - `permit_all` bypasses all policy checks for both hostnames and direct IP names.
 - Subdomain policies compare against the portion to the left of the registrable domain: `example.com` → `""`, `www.example.com` → `"www"`, `api.v2.example.com` → `"api.v2"`.
 - `max_subdomain_depth` and subdomain literal checks (`allow_subdomain`, `deny_subdomain`) run before regexp checks (`allow_regexp`, `deny_regexp`).
-- If `resolves_to` is configured, the requested name must resolve successfully and all of its resolved IPs must be present in the target set.
+- If `resolves_to` is configured, the requested name must share at least one DNS resolution chain element (CNAME name or IP address) with the set produced by resolving the configured targets.
 
 ## Policy Order
 
@@ -128,4 +128,4 @@ For each requested certificate name, the module applies checks in this order:
 5. If `allow_subdomain` is configured, deny hostnames whose subdomain portion does not match at least one configured literal.
 6. Deny hostnames matching any configured `deny_regexp` pattern.
 7. If `allow_regexp` is configured, deny hostnames that do not match at least one configured pattern.
-8. If `resolves_to` is configured, deny hostnames whose resolved IPs are not all present in the set produced by the configured targets.
+8. If `resolves_to` is configured, deny hostnames whose DNS resolution chain shares no element (CNAME name or IP address) with the set produced by resolving the configured targets.
