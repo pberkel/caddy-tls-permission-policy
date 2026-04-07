@@ -260,6 +260,48 @@ func TestCertificateAllowed(t *testing.T) {
 			t.Fatalf("expected local IP to be allowed, got %v", err)
 		}
 	})
+
+	t.Run("denies IP address name when permit_ip is false", func(t *testing.T) {
+		policy := newTestPolicy(t)
+
+		err := policy.CertificateAllowed(context.Background(), "203.0.113.10")
+		if !errors.Is(err, caddytls.ErrPermissionDenied) {
+			t.Fatalf("expected permission denied for IP address name, got %v", err)
+		}
+	})
+
+	t.Run("denies local IP address when permit_ip is true but permit_local is false", func(t *testing.T) {
+		policy := newTestPolicy(t)
+		policy.PermitIP = true
+
+		err := policy.CertificateAllowed(context.Background(), "127.0.0.1")
+		if !errors.Is(err, caddytls.ErrPermissionDenied) {
+			t.Fatalf("expected permission denied for local IP address, got %v", err)
+		}
+	})
+
+	t.Run("allows IP address name when matching resolves_to literal IP target", func(t *testing.T) {
+		policy := newTestPolicy(t)
+		policy.PermitIP = true
+		policy.PermitLocal = true
+		policy.ResolvesTo = []string{"203.0.113.10"}
+
+		if err := policy.CertificateAllowed(context.Background(), "203.0.113.10"); err != nil {
+			t.Fatalf("expected allow for IP address matching resolves_to target, got %v", err)
+		}
+	})
+
+	t.Run("denies IP address name when not matching resolves_to literal IP target", func(t *testing.T) {
+		policy := newTestPolicy(t)
+		policy.PermitIP = true
+		policy.PermitLocal = true
+		policy.ResolvesTo = []string{"203.0.113.20"}
+
+		err := policy.CertificateAllowed(context.Background(), "203.0.113.10")
+		if !errors.Is(err, caddytls.ErrPermissionDenied) {
+			t.Fatalf("expected permission denied for IP address not matching resolves_to target, got %v", err)
+		}
+	})
 }
 
 func newTestPolicy(t *testing.T) *PermissionByPolicy {

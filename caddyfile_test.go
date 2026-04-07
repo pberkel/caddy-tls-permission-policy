@@ -224,6 +224,68 @@ func TestProvision(t *testing.T) {
 			t.Fatalf("expected dns timeout %v, got %v", customDNSTimeout, policy.dnsClient.Timeout)
 		}
 	})
+
+	t.Run("fails when max_subdomain_depth is below -1", func(t *testing.T) {
+		policy := &PermissionByPolicy{}
+		policy.MaxSubdomainDepth = -2
+		policy.PermitAll = true
+		ctx, cancel := newProvisionContext(t)
+		defer cancel()
+
+		if err := policy.Provision(ctx); err == nil {
+			t.Fatal("expected provision error for max_subdomain_depth < -1, got nil")
+		}
+	})
+
+	t.Run("fails when allow_regexp contains an invalid pattern", func(t *testing.T) {
+		policy := &PermissionByPolicy{}
+		policy.MaxSubdomainDepth = -1
+		policy.AllowRegexp = []string{"[invalid"}
+		ctx, cancel := newProvisionContext(t)
+		defer cancel()
+
+		if err := policy.Provision(ctx); err == nil {
+			t.Fatal("expected provision error for invalid allow_regexp, got nil")
+		}
+	})
+
+	t.Run("fails when deny_regexp contains an invalid pattern", func(t *testing.T) {
+		policy := &PermissionByPolicy{}
+		policy.MaxSubdomainDepth = -1
+		policy.DenyRegexp = []string{"[invalid"}
+		ctx, cancel := newProvisionContext(t)
+		defer cancel()
+
+		if err := policy.Provision(ctx); err == nil {
+			t.Fatal("expected provision error for invalid deny_regexp, got nil")
+		}
+	})
+
+	t.Run("fails when resolver host is empty", func(t *testing.T) {
+		policy := &PermissionByPolicy{}
+		policy.MaxSubdomainDepth = -1
+		policy.AllowRegexp = []string{`^.*\.example\.com$`}
+		policy.Resolvers = []string{":53"}
+		ctx, cancel := newProvisionContext(t)
+		defer cancel()
+
+		if err := policy.Provision(ctx); err == nil {
+			t.Fatal("expected provision error for empty resolver host, got nil")
+		}
+	})
+
+	t.Run("fails when resolver port is invalid", func(t *testing.T) {
+		policy := &PermissionByPolicy{}
+		policy.MaxSubdomainDepth = -1
+		policy.AllowRegexp = []string{`^.*\.example\.com$`}
+		policy.Resolvers = []string{"203.0.113.10:0"}
+		ctx, cancel := newProvisionContext(t)
+		defer cancel()
+
+		if err := policy.Provision(ctx); err == nil {
+			t.Fatal("expected provision error for invalid resolver port, got nil")
+		}
+	})
 }
 
 func TestUnmarshalCaddyfileAccumulatesRepeatedDirectives(t *testing.T) {
@@ -358,6 +420,52 @@ func TestProvisionFailsOnInvalidMaxSubdomainDepthPlaceholderValue(t *testing.T) 
 
 	if err := policy.Provision(ctx); err == nil {
 		t.Fatal("expected provision error for invalid max_subdomain_depth, got nil")
+	}
+}
+
+func TestUnmarshalCaddyfileFailsOnMissingValue(t *testing.T) {
+	policy := &PermissionByPolicy{}
+	dispenser := caddyfile.NewTestDispenser(`
+	permission {
+		allow_regexp
+	}
+	`)
+
+	if err := policy.UnmarshalCaddyfile(dispenser); err == nil {
+		t.Fatal("expected error for missing config value, got nil")
+	}
+}
+
+func TestUnmarshalCaddyfileFailsOnUnrecognizedParameter(t *testing.T) {
+	policy := &PermissionByPolicy{}
+	dispenser := caddyfile.NewTestDispenser(`
+	permission {
+		unknown_key value
+	}
+	`)
+
+	if err := policy.UnmarshalCaddyfile(dispenser); err == nil {
+		t.Fatal("expected error for unrecognized parameter, got nil")
+	}
+}
+
+func TestUnmarshalCaddyfileBlockSyntaxForMultipleValues(t *testing.T) {
+	policy := &PermissionByPolicy{}
+	dispenser := caddyfile.NewTestDispenser(`
+	permission {
+		allow_regexp {
+			^api\.example\.com$
+			^www\.example\.com$
+		}
+	}
+	`)
+
+	if err := policy.UnmarshalCaddyfile(dispenser); err != nil {
+		t.Fatalf("unexpected unmarshal error: %v", err)
+	}
+
+	if len(policy.AllowRegexp) != 2 {
+		t.Fatalf("expected 2 allow_regexp entries from block syntax, got %d", len(policy.AllowRegexp))
 	}
 }
 

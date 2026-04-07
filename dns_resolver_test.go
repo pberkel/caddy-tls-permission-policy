@@ -149,6 +149,129 @@ func TestCertificateAllowedDNS(t *testing.T) {
 			t.Fatalf("expected allow using resolver-backed CNAME resolution, got %v", err)
 		}
 	})
+
+	t.Run("returns error when DNS resolver returns non-success rcode", func(t *testing.T) {
+		pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("listen udp: %v", err)
+		}
+		server := &miekgdns.Server{
+			PacketConn: pc,
+			Handler: miekgdns.HandlerFunc(func(w miekgdns.ResponseWriter, r *miekgdns.Msg) {
+				msg := new(miekgdns.Msg)
+				msg.SetRcode(r, miekgdns.RcodeNameError)
+				_ = w.WriteMsg(msg)
+			}),
+		}
+		go func() { _ = server.ActivateAndServe() }()
+		t.Cleanup(func() { _ = server.Shutdown(); _ = pc.Close() })
+
+		policy := newTestPolicy(t)
+		policy.AllowRegexp = []string{`^api\.example\.com$`}
+		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
+		policy.Resolvers = []string{pc.LocalAddr().String()}
+		policy.dnsClient = &miekgdns.Client{Timeout: 2 * time.Second}
+
+		err = policy.CertificateAllowed(context.Background(), "api.example.com")
+		if !errors.Is(err, caddytls.ErrPermissionDenied) {
+			t.Fatalf("expected permission denied for non-success rcode, got %v", err)
+		}
+	})
+
+	t.Run("returns error when DNS resolver is unreachable", func(t *testing.T) {
+		// Bind a UDP socket but never read from it so all queries time out.
+		pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("listen udp: %v", err)
+		}
+		t.Cleanup(func() { pc.Close() })
+
+		policy := newTestPolicy(t)
+		policy.AllowRegexp = []string{`^api\.example\.com$`}
+		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
+		policy.Resolvers = []string{pc.LocalAddr().String()}
+		policy.dnsClient = &miekgdns.Client{Timeout: 100 * time.Millisecond}
+
+		err = policy.CertificateAllowed(context.Background(), "api.example.com")
+		if !errors.Is(err, caddytls.ErrPermissionDenied) {
+			t.Fatalf("expected permission denied for unreachable resolver, got %v", err)
+		}
+	})
+
+	t.Run("returns error when hostname has no A or AAAA records", func(t *testing.T) {
+		nameserver := startTestDNSServer(t, nil, nil)
+
+		policy := newTestPolicy(t)
+		policy.AllowRegexp = []string{`^api\.example\.com$`}
+		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
+		policy.Resolvers = []string{nameserver}
+		policy.dnsClient = &miekgdns.Client{Timeout: 2 * time.Second}
+
+		err := policy.CertificateAllowed(context.Background(), "api.example.com")
+		if !errors.Is(err, caddytls.ErrPermissionDenied) {
+			t.Fatalf("expected permission denied for hostname with no DNS records, got %v", err)
+		}
+	})
+
+	t.Run("returns error on CNAME loop", func(t *testing.T) {
+		nameserver := startTestDNSServer(t, nil, map[string]string{
+			"a.example.com.": "b.example.com.",
+			"b.example.com.": "a.example.com.",
+		})
+
+		policy := newTestPolicy(t)
+		policy.AllowRegexp = []string{`^a\.example\.com$`}
+		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
+		policy.Resolvers = []string{nameserver}
+		policy.dnsClient = &miekgdns.Client{Timeout: 2 * time.Second}
+
+		err := policy.CertificateAllowed(context.Background(), "a.example.com")
+		if !errors.Is(err, caddytls.ErrPermissionDenied) {
+			t.Fatalf("expected permission denied for CNAME loop, got %v", err)
+		}
+	})
+
+	t.Run("returns error when CNAME chain exceeds maximum depth", func(t *testing.T) {
+		nameserver := startTestDNSServer(t, nil, map[string]string{
+			"c1.example.com.": "c2.example.com.",
+			"c2.example.com.": "c3.example.com.",
+			"c3.example.com.": "c4.example.com.",
+			"c4.example.com.": "c5.example.com.",
+			"c5.example.com.": "c6.example.com.",
+			"c6.example.com.": "c7.example.com.",
+			"c7.example.com.": "c8.example.com.",
+			"c8.example.com.": "c9.example.com.",
+		})
+
+		policy := newTestPolicy(t)
+		policy.AllowRegexp = []string{`^c1\.example\.com$`}
+		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
+		policy.Resolvers = []string{nameserver}
+		policy.dnsClient = &miekgdns.Client{Timeout: 2 * time.Second}
+
+		err := policy.CertificateAllowed(context.Background(), "c1.example.com")
+		if !errors.Is(err, caddytls.ErrPermissionDenied) {
+			t.Fatalf("expected permission denied for CNAME chain depth exceeded, got %v", err)
+		}
+	})
+
+	t.Run("allows when resolves_to target is a literal IP matching the hostname's resolved address", func(t *testing.T) {
+		nameserver := startTestDNSServer(t, map[string][]netip.Addr{
+			"svc.example.com.": {netip.MustParseAddr("203.0.113.10")},
+		}, nil)
+
+		policy := newTestPolicy(t)
+		policy.AllowRegexp = []string{`^svc\.example\.com$`}
+		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
+		policy.ResolvesTo = []string{"203.0.113.10"}
+		policy.PermitLocal = true
+		policy.Resolvers = []string{nameserver}
+		policy.dnsClient = &miekgdns.Client{Timeout: 2 * time.Second}
+
+		if err := policy.CertificateAllowed(context.Background(), "svc.example.com"); err != nil {
+			t.Fatalf("expected allow with literal IP resolves_to target, got %v", err)
+		}
+	})
 }
 
 func TestCheckResolvesTo(t *testing.T) {
