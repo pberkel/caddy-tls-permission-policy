@@ -44,7 +44,6 @@ func (PermissionByPolicy) CaddyModule() caddy.ModuleInfo {
 		New: func() caddy.Module {
 			return &PermissionByPolicy{
 				MaxSubdomainDepth: defaultMaxSubdomainDepth,
-				MaxCertsPerDomain: defaultMaxCertsPerDomain,
 			}
 		},
 	}
@@ -98,11 +97,6 @@ func (p *PermissionByPolicy) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 					return d.Err("too many arguments supplied to max_subdomain_depth")
 				}
 				p.MaxSubdomainDepthRaw = configVal[0]
-			case "max_certs_per_domain":
-				if len(configVal) > 1 {
-					return d.Err("too many arguments supplied to max_certs_per_domain")
-				}
-				p.MaxCertsPerDomainRaw = configVal[0]
 			case "permit_ip":
 				if err := parseBoolInto(&p.PermitIP, configKey, configVal); err != nil {
 					return err
@@ -115,16 +109,6 @@ func (p *PermissionByPolicy) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				if err := parseBoolInto(&p.PermitAll, configKey, configVal); err != nil {
 					return err
 				}
-			case "rate_limit":
-				if len(configVal) != 2 {
-					return d.Err("rate_limit requires exactly two arguments: limit and duration")
-				}
-				p.GlobalRateLimit = &RateLimit{LimitRaw: configVal[0], DurationRaw: configVal[1]}
-			case "per_domain_rate_limit":
-				if len(configVal) != 2 {
-					return d.Err("per_domain_rate_limit requires exactly two arguments: limit and duration")
-				}
-				p.PerDomainRateLimit = &RateLimit{LimitRaw: configVal[0], DurationRaw: configVal[1]}
 			default:
 				return d.Errf("unrecognized configuration parameter: %s", configKey)
 			}
@@ -137,20 +121,15 @@ func (p *PermissionByPolicy) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 	p.logger = ctx.Logger()
 	replacer := caddy.NewReplacer()
-	p.storage = ctx.Storage()
 	p.allowRegexp = nil
 	p.denyRegexp = nil
 	p.lookupNetIP = net.DefaultResolver.LookupNetIP
-	p.approvals = &approvalState{
-		atCapacityDomains: make(map[string]time.Time),
-		now:               time.Now,
-	}
 	p.resolvedTargets = &resolvedTargetsCache{
 		now: time.Now,
 	}
 
-	// Replace placeholders in max_subdomain_depth and max_certs_per_domain raw values (set
-	// during Caddyfile parsing) and parse them into the concrete fields used at runtime.
+	// Replace placeholders in max_subdomain_depth raw value (set during Caddyfile parsing)
+	// and parse it into the concrete field used at runtime.
 	if p.MaxSubdomainDepthRaw != "" {
 		raw := replacer.ReplaceAll(p.MaxSubdomainDepthRaw, "")
 		val, err := strconv.Atoi(raw)
@@ -159,21 +138,10 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 		}
 		p.MaxSubdomainDepth = val
 	}
-	if p.MaxCertsPerDomainRaw != "" {
-		raw := replacer.ReplaceAll(p.MaxCertsPerDomainRaw, "")
-		val, err := strconv.Atoi(raw)
-		if err != nil {
-			return fmt.Errorf("invalid integer value for max_certs_per_domain: %s", raw)
-		}
-		p.MaxCertsPerDomain = val
-	}
 
 	// Validate integer settings: -1 means "no limit"; values below -1 are not valid.
 	if p.MaxSubdomainDepth < -1 {
 		return fmt.Errorf("max_subdomain_depth must be -1 (no limit) or >= 0, got %d", p.MaxSubdomainDepth)
-	}
-	if p.MaxCertsPerDomain < -1 {
-		return fmt.Errorf("max_certs_per_domain must be -1 (no limit) or >= 0, got %d", p.MaxCertsPerDomain)
 	}
 
 	// Ensure at least one policy option is configured in the module.
@@ -184,9 +152,6 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 		len(p.DenySubdomain) == 0 &&
 		len(p.ResolvesTo) == 0 &&
 		p.MaxSubdomainDepth < 0 &&
-		p.MaxCertsPerDomain < 0 &&
-		p.GlobalRateLimit == nil &&
-		p.PerDomainRateLimit == nil &&
 		!p.PermitIP &&
 		!p.PermitLocal {
 		return fmt.Errorf("at least one policy setting must be configured unless 'permit_all' is true")
@@ -252,29 +217,6 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 		p.dnsClient = &miekgdns.Client{Timeout: customDNSTimeout}
 	}
 
-	// Replace placeholders in rate limit raw values (set during Caddyfile parsing) and
-	// parse them into the concrete Limit and Duration fields used at runtime.
-	if err := p.GlobalRateLimit.resolve(replacer, "rate_limit"); err != nil {
-		return err
-	}
-	if err := p.PerDomainRateLimit.resolve(replacer, "per_domain_rate_limit"); err != nil {
-		return err
-	}
-
-	// Validate and initialize rate limit state.
-	if err := p.GlobalRateLimit.validate("global_rate_limit"); err != nil {
-		return err
-	}
-	if err := p.PerDomainRateLimit.validate("per_domain_rate_limit"); err != nil {
-		return err
-	}
-	p.rateLimiter = &rateLimitState{
-		globalLimit:    p.GlobalRateLimit,
-		perDomainLimit: p.PerDomainRateLimit,
-		domains:        make(map[string]*windowCounter),
-		now:            time.Now,
-	}
-
 	if c := p.logger.Check(zapcore.InfoLevel, "provisioned tls.permission.policy"); c != nil {
 		c.Write(
 			zap.Int("allow_regexp_count", len(p.AllowRegexp)),
@@ -284,12 +226,9 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 			zap.Int("resolves_to_count", len(p.ResolvesTo)),
 			zap.Int("resolvers_count", len(p.Resolvers)),
 			zap.Int("max_subdomain_depth", p.MaxSubdomainDepth),
-			zap.Int("max_certs_per_domain", p.MaxCertsPerDomain),
 			zap.Bool("permit_ip", p.PermitIP),
 			zap.Bool("permit_local", p.PermitLocal),
 			zap.Bool("permit_all", p.PermitAll),
-			zap.Bool("global_rate_limit", p.GlobalRateLimit != nil),
-			zap.Bool("per_domain_rate_limit", p.PerDomainRateLimit != nil),
 		)
 	}
 

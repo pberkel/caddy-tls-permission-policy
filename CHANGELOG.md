@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Removed
+- `max_certs_per_domain` configuration option and all associated approval state persistence. Certificate cap functionality is out of scope for this module.
+- `rate_limit` and `per_domain_rate_limit` configuration options and all associated in-memory sliding-window counters. Issuance rate limiting is now provided by [`caddy-issuer-rate-limit`](https://github.com/pberkel/caddy-issuer-rate-limit), which enforces limits after `SubjectTransformer` has run (on effective certificate subjects rather than raw hostnames).
+
+---
+
 ## [v1.2.3] - 2026-04-01
 
 ### Changed

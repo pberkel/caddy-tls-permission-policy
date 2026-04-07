@@ -23,9 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/modules/caddytls"
-	"github.com/caddyserver/certmagic"
 	"go.uber.org/zap"
 )
 
@@ -241,108 +239,6 @@ func TestCertificateAllowed(t *testing.T) {
 		}
 	})
 
-	t.Run("allows when only max_certs_per_domain is configured", func(t *testing.T) {
-		policy := newTestPolicy(t)
-		policy.MaxCertsPerDomain = 2
-		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
-			"api.example.com": {netip.MustParseAddr("203.0.113.10")},
-			"www.example.com": {netip.MustParseAddr("203.0.113.11")},
-		})
-
-		if err := policy.CertificateAllowed(context.Background(), "api.example.com"); err != nil {
-			t.Fatalf("expected first name to be allowed, got %v", err)
-		}
-		if err := policy.CertificateAllowed(context.Background(), "www.example.com"); err != nil {
-			t.Fatalf("expected second name in same domain to be allowed, got %v", err)
-		}
-	})
-
-	t.Run("caps approvals per eTLD+1 bucket", func(t *testing.T) {
-		policy := newTestPolicy(t)
-		policy.AllowRegexp = []string{`^.*\.example\.com$`}
-		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
-		policy.MaxCertsPerDomain = 1
-		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
-			"api.example.com": {netip.MustParseAddr("203.0.113.10")},
-			"www.example.com": {netip.MustParseAddr("203.0.113.11")},
-		})
-
-		if err := policy.CertificateAllowed(context.Background(), "api.example.com"); err != nil {
-			t.Fatalf("expected first name to be allowed, got %v", err)
-		}
-		if err := policy.CertificateAllowed(context.Background(), "api.example.com"); err != nil {
-			t.Fatalf("expected repeated approval for same name to be allowed, got %v", err)
-		}
-
-		err := policy.CertificateAllowed(context.Background(), "www.example.com")
-		if !errors.Is(err, caddytls.ErrPermissionDenied) {
-			t.Fatalf("expected second unique name to be denied, got %v", err)
-		}
-	})
-
-	t.Run("persists approval caps across policy instances sharing storage", func(t *testing.T) {
-		storagePath := t.TempDir()
-		firstPolicy := newSharedStorageTestPolicy(t, storagePath)
-		firstPolicy.AllowRegexp = []string{`^.*\.example\.com$`}
-		firstPolicy.allowRegexp = mustCompileRegexps(t, firstPolicy.AllowRegexp)
-		firstPolicy.MaxCertsPerDomain = 1
-		firstPolicy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
-			"api.example.com": {netip.MustParseAddr("203.0.113.10")},
-			"www.example.com": {netip.MustParseAddr("203.0.113.11")},
-		})
-
-		if err := firstPolicy.CertificateAllowed(context.Background(), "api.example.com"); err != nil {
-			t.Fatalf("expected first instance approval to succeed, got %v", err)
-		}
-
-		secondPolicy := newSharedStorageTestPolicy(t, storagePath)
-		secondPolicy.AllowRegexp = []string{`^.*\.example\.com$`}
-		secondPolicy.allowRegexp = mustCompileRegexps(t, secondPolicy.AllowRegexp)
-		secondPolicy.MaxCertsPerDomain = 1
-		secondPolicy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
-			"www.example.com": {netip.MustParseAddr("203.0.113.11")},
-		})
-
-		err := secondPolicy.CertificateAllowed(context.Background(), "www.example.com")
-		if !errors.Is(err, caddytls.ErrPermissionDenied) {
-			t.Fatalf("expected second instance to observe persisted limit, got %v", err)
-		}
-	})
-
-	t.Run("dedupes repeated approvals for the effective domain itself", func(t *testing.T) {
-		policy := newTestPolicy(t)
-		policy.AllowRegexp = []string{`^example\.com$`}
-		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
-		policy.MaxCertsPerDomain = 1
-		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
-			"example.com": {netip.MustParseAddr("203.0.113.10")},
-		})
-
-		if err := policy.CertificateAllowed(context.Background(), "example.com"); err != nil {
-			t.Fatalf("expected first approval to be allowed, got %v", err)
-		}
-		if err := policy.CertificateAllowed(context.Background(), "example.com"); err != nil {
-			t.Fatalf("expected repeated approval to be allowed, got %v", err)
-		}
-	})
-
-	t.Run("dedupes normalized names for max_certs_per_domain", func(t *testing.T) {
-		policy := newTestPolicy(t)
-		policy.AllowRegexp = []string{`^api\.example\.com$`}
-		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
-		policy.MaxCertsPerDomain = 1
-		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
-			"api.example.com": {netip.MustParseAddr("203.0.113.10")},
-		})
-
-		if err := policy.CertificateAllowed(context.Background(), "api.example.com"); err != nil {
-			t.Fatalf("expected first approval to be allowed, got %v", err)
-		}
-		if err := policy.CertificateAllowed(context.Background(), "API.EXAMPLE.COM."); err != nil {
-			t.Fatalf("expected normalized duplicate approval to be allowed, got %v", err)
-		}
-	})
-
 	t.Run("allows when only max_subdomain_depth is configured and limit is satisfied", func(t *testing.T) {
 		policy := newTestPolicy(t)
 		policy.MaxSubdomainDepth = 1
@@ -364,91 +260,18 @@ func TestCertificateAllowed(t *testing.T) {
 			t.Fatalf("expected local IP to be allowed, got %v", err)
 		}
 	})
-
-	t.Run("global rate limit denies after limit reached", func(t *testing.T) {
-		policy := newTestPolicy(t)
-		policy.AllowRegexp = []string{`^.*\.example\.com$`}
-		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
-		policy.GlobalRateLimit = &RateLimit{Limit: 2, Duration: caddy.Duration(time.Minute)}
-		policy.rateLimiter = &rateLimitState{
-			globalLimit: policy.GlobalRateLimit,
-			domains:     make(map[string]*windowCounter),
-			now:         time.Now,
-		}
-		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
-			"api.example.com": {netip.MustParseAddr("203.0.113.10")},
-			"www.example.com": {netip.MustParseAddr("203.0.113.10")},
-			"foo.example.com": {netip.MustParseAddr("203.0.113.10")},
-		})
-
-		if err := policy.CertificateAllowed(context.Background(), "api.example.com"); err != nil {
-			t.Fatalf("expected first approval to be allowed, got %v", err)
-		}
-		if err := policy.CertificateAllowed(context.Background(), "www.example.com"); err != nil {
-			t.Fatalf("expected second approval to be allowed, got %v", err)
-		}
-		err := policy.CertificateAllowed(context.Background(), "foo.example.com")
-		if !errors.Is(err, caddytls.ErrPermissionDenied) {
-			t.Fatalf("expected global rate limit denial, got %v", err)
-		}
-	})
-
-	t.Run("per-domain rate limit denies after limit reached for same domain", func(t *testing.T) {
-		policy := newTestPolicy(t)
-		policy.AllowRegexp = []string{`^.*\.example\.(com|net)$`}
-		policy.allowRegexp = mustCompileRegexps(t, policy.AllowRegexp)
-		policy.PerDomainRateLimit = &RateLimit{Limit: 1, Duration: caddy.Duration(time.Minute)}
-		policy.rateLimiter = &rateLimitState{
-			perDomainLimit: policy.PerDomainRateLimit,
-			domains:        make(map[string]*windowCounter),
-			now:            time.Now,
-		}
-		policy.lookupNetIP = fakeResolver(map[string][]netip.Addr{
-			"api.example.com": {netip.MustParseAddr("203.0.113.10")},
-			"www.example.com": {netip.MustParseAddr("203.0.113.10")},
-			"foo.example.net": {netip.MustParseAddr("203.0.113.10")},
-		})
-
-		if err := policy.CertificateAllowed(context.Background(), "api.example.com"); err != nil {
-			t.Fatalf("expected first approval to be allowed, got %v", err)
-		}
-		err := policy.CertificateAllowed(context.Background(), "www.example.com")
-		if !errors.Is(err, caddytls.ErrPermissionDenied) {
-			t.Fatalf("expected per-domain rate limit denial for same domain, got %v", err)
-		}
-		// Different registrable domain is unaffected.
-		if err := policy.CertificateAllowed(context.Background(), "foo.example.net"); err != nil {
-			t.Fatalf("expected different domain to be allowed, got %v", err)
-		}
-	})
 }
 
 func newTestPolicy(t *testing.T) *PermissionByPolicy {
 	t.Helper()
 
-	return newSharedStorageTestPolicy(t, t.TempDir())
-}
-
-func newSharedStorageTestPolicy(t *testing.T, storagePath string) *PermissionByPolicy {
-	t.Helper()
-
 	policy := &PermissionByPolicy{
 		MaxSubdomainDepth: defaultMaxSubdomainDepth,
-		MaxCertsPerDomain: defaultMaxCertsPerDomain,
 	}
 	policy.logger = zap.NewNop()
 	policy.lookupNetIP = net.DefaultResolver.LookupNetIP
-	policy.storage = &certmagic.FileStorage{Path: storagePath}
-	policy.approvals = &approvalState{
-		atCapacityDomains: make(map[string]time.Time),
-		now:               time.Now,
-	}
 	policy.resolvedTargets = &resolvedTargetsCache{
 		now: time.Now,
-	}
-	policy.rateLimiter = &rateLimitState{
-		domains: make(map[string]*windowCounter),
-		now:     time.Now,
 	}
 	return policy
 }
