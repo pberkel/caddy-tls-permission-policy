@@ -19,15 +19,30 @@ import (
 	"fmt"
 	"net/netip"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/caddyserver/caddy/v2/modules/caddytls"
 	miekgdns "github.com/miekg/dns"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"golang.org/x/sync/singleflight"
 )
 
 const maxCNAMEChainDepth = 8
+const resolvedTargetsCacheTTL = 5 * time.Minute
+
+// resolvedTargetsCache holds the resolved IP addresses of all configured
+// resolves_to targets with a TTL-based expiry. Concurrent cache misses are
+// coalesced via a singleflight group so that only one DNS resolution runs at a time.
+type resolvedTargetsCache struct {
+	mu     sync.RWMutex
+	sf     singleflight.Group
+	addrs  map[netip.Addr]struct{}
+	expiry time.Time
+	now    func() time.Time
+}
 
 // ResolveAddrs resolves a hostname or literal IP into one or more IP addresses.
 func (p *PermissionByPolicy) resolveAddrs(ctx context.Context, name string) ([]netip.Addr, error) {
@@ -76,11 +91,10 @@ func (p *PermissionByPolicy) resolveAddrsWithClient(ctx context.Context, name st
 		cnameTarget = ""
 		clear(resolved)
 
-		// Query every configured resolver for both record types. If one resolver
-		// returns a CNAME and another returns A/AAAA records for the same name, the
-		// A/AAAA records take precedence (resolved is non-empty, loop breaks early and
-		// the CNAME is not followed). All configured resolvers are expected to return
-		// consistent records for a given name.
+		// Query each configured resolver for A and AAAA records, stopping at the
+		// first resolver that returns results. If a resolver returns a CNAME instead
+		// of A/AAAA records, the CNAME target is recorded and the outer loop follows
+		// it on the next iteration.
 		for _, resolver := range p.Resolvers {
 			for _, qtype := range []uint16{miekgdns.TypeA, miekgdns.TypeAAAA} {
 				msg := &miekgdns.Msg{}
@@ -112,6 +126,9 @@ func (p *PermissionByPolicy) resolveAddrsWithClient(ctx context.Context, name st
 						}
 					}
 				}
+			}
+			if len(resolved) > 0 {
+				break
 			}
 		}
 

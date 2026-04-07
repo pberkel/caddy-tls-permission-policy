@@ -17,7 +17,7 @@ package tlspermissionpolicy
 import (
 	"context"
 	"errors"
-	"net"
+	"fmt"
 	"net/netip"
 	"regexp"
 	"testing"
@@ -269,7 +269,9 @@ func newTestPolicy(t *testing.T) *PermissionByPolicy {
 		MaxSubdomainDepth: defaultMaxSubdomainDepth,
 	}
 	policy.logger = zap.NewNop()
-	policy.lookupNetIP = net.DefaultResolver.LookupNetIP
+	policy.lookupNetIP = func(_ context.Context, _, host string) ([]netip.Addr, error) {
+		return nil, fmt.Errorf("no fake resolver configured for %q", host)
+	}
 	policy.resolvedTargets = &resolvedTargetsCache{
 		now: time.Now,
 	}

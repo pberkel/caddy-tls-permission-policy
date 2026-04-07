@@ -20,8 +20,6 @@ import (
 	"net/netip"
 	"regexp"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/caddyserver/caddy/v2/modules/caddytls"
 	miekgdns "github.com/miekg/dns"
@@ -29,11 +27,9 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/net/publicsuffix"
-	"golang.org/x/sync/singleflight"
 )
 
 const defaultMaxSubdomainDepth = -1
-const resolvedTargetsCacheTTL = 5 * time.Minute
 
 // PermissionByPolicy determines permission for a TLS certificate by
 // validating the name against a specified policy configuration.
@@ -70,16 +66,8 @@ type PermissionByPolicy struct {
 	denyRegexp        []*regexp.Regexp                                            `json:"-"`
 	allowSubdomainSet map[string]struct{}                                         `json:"-"`
 	denySubdomainSet  map[string]struct{}                                         `json:"-"`
-	lookupNetIP       func(context.Context, string, string) ([]netip.Addr, error) `json:"-"`
-	resolvedTargets   *resolvedTargetsCache                                       `json:"-"`
-}
-
-type resolvedTargetsCache struct {
-	mu     sync.RWMutex
-	sf     singleflight.Group
-	addrs  map[netip.Addr]struct{}
-	expiry time.Time
-	now    func() time.Time
+	lookupNetIP     func(context.Context, string, string) ([]netip.Addr, error) `json:"-"`
+	resolvedTargets *resolvedTargetsCache                                       `json:"-"`
 }
 
 // CertificateAllowed evaluates the configured policy for a requested certificate name.
@@ -122,6 +110,9 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 	}
 
 	// Resolve name into IP address(es) for policy checks.
+	// DNS resolution is required in two cases: when permit_local is false (to
+	// reject names that resolve to local IPs) and when resolves_to is configured
+	// (to validate the name resolves to the expected targets).
 	var resolvedName []netip.Addr
 	if !p.PermitLocal || len(p.ResolvesTo) > 0 {
 		var err error
@@ -260,17 +251,13 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 	}
 
 	if c := p.logger.Check(zapcore.DebugLevel, "certificate request allowed by policy"); c != nil {
-		c.Write(
-			zap.String("name", name),
-			zap.String("effective_domain", effectiveDomain),
-			zap.String("effective_subdomain", effectiveSubdomain),
-		)
+		c.Write(zap.String("name", name))
 	}
 
 	return nil
 }
 
-// IsLocalIP determines whether an address is loopback, private, link-local, or unspecified.
+// isLocalIP determines whether an address is loopback, private, link-local, or unspecified.
 func isLocalIP(addr netip.Addr) bool {
 	return addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() || addr.IsUnspecified()
 }
