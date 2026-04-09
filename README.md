@@ -2,7 +2,7 @@
 
 This module implements the Caddy Server [OnDemandPermission](https://caddyserver.com/docs/automatic-https#on-demand-tls) [interface](https://pkg.go.dev/github.com/caddyserver/caddy/v2/modules/caddytls#OnDemandPermission) to control permissions for on-demand TLS certificate requests. It is useful in cases where specific hostnames requiring TLS certificates are not known and cannot be directly configured (such as a SaaS provider that allows customer-supplied domains) but can be defined through explicit policy rules. The module also implements several control mechanisms designed to prevent abuse.
 
-> **Rate limiting:** Certificate issuance rate limiting is not provided by this module. Use [`caddy-issuer-rate-limit`](https://github.com/pberkel/caddy-issuer-rate-limit) for configurable per-domain and global issuance rate limits.
+> **Rate limiting:** Certificate issuance rate limiting is not provided by this module. Use [`caddy-tls-issuer-rate-limit`](https://github.com/pberkel/caddy-tls-issuer-rate-limit) for configurable per-domain and global issuance rate limits.
 
 ## Build Instructions
 
@@ -26,9 +26,9 @@ Configure the module in an on-demand TLS permission block. The example below dem
 			deny_regexp ^(blocked|secret)\.example\.com$
 			allow_subdomain www api ""
 			deny_subdomain internal private
+			max_subdomain_depth 1
 			resolvers 8.8.8.8
 			resolves_to my-caddy-server.example.net
-			max_subdomain_depth 1
 			permit_ip false
 			permit_local false
 			permit_all false

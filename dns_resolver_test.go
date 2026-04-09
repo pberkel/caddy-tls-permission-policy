@@ -294,7 +294,7 @@ func TestCheckResolvesTo(t *testing.T) {
 			addrs: []netip.Addr{netip.MustParseAddr("203.0.113.99")},
 		}
 
-		if err := policy.checkResolvesTo(context.Background(), chain); err != nil {
+		if err := policy.checkResolvesTo(chain, policy.resolvedTargets.members); err != nil {
 			t.Fatalf("expected allow via CNAME name match, got %v", err)
 		}
 	})
@@ -315,7 +315,7 @@ func TestCheckResolvesTo(t *testing.T) {
 			addrs: []netip.Addr{netip.MustParseAddr("203.0.113.10")},
 		}
 
-		if err := policy.checkResolvesTo(context.Background(), chain); err != nil {
+		if err := policy.checkResolvesTo(chain, policy.resolvedTargets.members); err != nil {
 			t.Fatalf("expected allow via IP match, got %v", err)
 		}
 	})
@@ -337,7 +337,7 @@ func TestCheckResolvesTo(t *testing.T) {
 			addrs: []netip.Addr{netip.MustParseAddr("203.0.113.99")},
 		}
 
-		err := policy.checkResolvesTo(context.Background(), chain)
+		err := policy.checkResolvesTo(chain, policy.resolvedTargets.members)
 		if !errors.Is(err, caddytls.ErrPermissionDenied) {
 			t.Fatalf("expected permission denied, got %v", err)
 		}

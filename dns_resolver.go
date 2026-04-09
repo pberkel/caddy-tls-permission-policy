@@ -207,11 +207,7 @@ func (p *PermissionByPolicy) resolveChainWithClient(ctx context.Context, name st
 // This allows matching across geo-DNS boundaries: if the incoming hostname
 // and a resolves_to target share a common intermediate CNAME (e.g. a CDN
 // hostname), the check passes even if their final IPs differ.
-func (p *PermissionByPolicy) checkResolvesTo(ctx context.Context, chain *resolvedChain) error {
-	allowed, err := p.allowedTargetMembers(ctx)
-	if err != nil {
-		return err
-	}
+func (p *PermissionByPolicy) checkResolvesTo(chain *resolvedChain, allowed map[string]struct{}) error {
 	if c := p.logger.Check(zapcore.DebugLevel, "evaluated resolves_to targets"); c != nil {
 		c.Write(
 			zap.Strings("resolved_names", chain.names),

@@ -49,8 +49,8 @@ type PermissionByPolicy struct {
 	// The maximum subdomain depth measured to the left of the effective domain. The effective domain itself has depth 0. Default -1 no limit.
 	MaxSubdomainDepth int `json:"max_subdomain_depth"`
 	// Raw string value for max_subdomain_depth; may contain Caddy placeholders resolved at provisioning time.
-	// When non-empty, takes precedence over MaxSubdomainDepth.
-	MaxSubdomainDepthRaw string `json:"max_subdomain_depth_raw,omitempty"`
+	// When non-empty, takes precedence over MaxSubdomainDepth. Caddyfile-only; excluded from JSON serialization.
+	MaxSubdomainDepthRaw string `json:"-"`
 	// Allow certificates for IP address hosts. When true, IP address names bypass all other
 	// policy checks (regexp patterns, subdomain rules) and are evaluated only against the
 	// permit_local and resolves_to policies. Default: false.
@@ -89,7 +89,11 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 			return fmt.Errorf("%w: IP address is local", caddytls.ErrPermissionDenied)
 		}
 		if len(p.ResolvesTo) > 0 {
-			if err := p.checkResolvesTo(ctx, &resolvedChain{addrs: []netip.Addr{addr}}); err != nil {
+			allowed, err := p.allowedTargetMembers(ctx)
+			if err != nil {
+				return err
+			}
+			if err := p.checkResolvesTo(&resolvedChain{addrs: []netip.Addr{addr}}, allowed); err != nil {
 				return err
 			}
 		}
@@ -114,13 +118,13 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 	// reject names that resolve to local IPs) and when resolves_to is configured
 	// (to validate the name resolves to the expected targets).
 	var resolvedName *resolvedChain
+	var earlyExit map[string]struct{}
 	if !p.PermitLocal || len(p.ResolvesTo) > 0 {
 		// Pre-fetch the allowed target members so that resolution of the incoming
 		// hostname can terminate early as soon as a visited CNAME name matches.
 		// When a CNAME name match triggers early exit, chain.addrs will be empty
 		// and the permit_local IP check below is skipped — this is intentional,
 		// since the hostname is already matched against an explicitly trusted target.
-		var earlyExit map[string]struct{}
 		if len(p.ResolvesTo) > 0 {
 			var err error
 			earlyExit, err = p.allowedTargetMembers(ctx)
@@ -142,8 +146,7 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 				}
 			}
 		}
-		// ResolvesTo policy enforcement requires expensive DNS lookups,
-		// so the code to check will execute after less-expensive policy enforcement.
+		// ResolvesTo is checked last: all cheaper policy checks (subdomain, regexp) run first.
 	}
 
 	// Determine the effective domain (from the public suffix list)
@@ -259,7 +262,7 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 	// Check whether name resolves to one of the provided hostnames / IPs (which should point
 	// to this server) to ensure ACME HTTP-01 or TLS-ALPN-01 challenge will be successful.
 	if len(p.ResolvesTo) > 0 {
-		if err := p.checkResolvesTo(ctx, resolvedName); err != nil {
+		if err := p.checkResolvesTo(resolvedName, earlyExit); err != nil {
 			return err
 		}
 	}
@@ -271,7 +274,7 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 	return nil
 }
 
-// isLocalIP determines whether an address is loopback, private, link-local, or unspecified.
+// isLocalIP determines whether an address is loopback, private, link-local, multicast, or unspecified.
 func isLocalIP(addr netip.Addr) bool {
-	return addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast() || addr.IsLinkLocalMulticast() || addr.IsUnspecified()
+	return addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast() || addr.IsMulticast() || addr.IsUnspecified()
 }

@@ -7,14 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [v1.3.0] - 2026-04-09
+
+### Fixed
+- `isLocalIP` now rejects global multicast addresses (224.0.0.0/4, ff00::/8). Previously only link-local multicast was checked, allowing hostnames that resolve to global multicast IPs to bypass the `permit_local: false` check.
+- `parseBoolInto` now validates that a value was supplied, making the function safe to call independently of the outer empty-value guard.
+
 ### Changed
 - `resolves_to` now performs CNAME-aware matching when `resolvers` is configured: the full DNS resolution chain (initial query name plus each intermediate CNAME target) is collected for both the incoming hostname and each configured target. A hostname passes if any chain element — CNAME name or final IP address — appears in the set produced by resolving the targets. This means a hostname that shares an intermediate CNAME with a target (e.g. both aliasing the same CDN hostname) passes even when their final IP addresses differ, as can happen across geo-DNS boundaries. Without `resolvers`, the system resolver is used and matching falls back to IP comparison only, as the system resolver does not expose intermediate CNAME records.
 - `resolves_to` matching now uses "any chain element matches" semantics. Previously all resolved IP addresses of the incoming hostname had to be present in the target set; now a single matching element is sufficient.
-- When `resolves_to` is configured, allowed target members are resolved before the incoming hostname so that CNAME name matching can short-circuit resolution of the incoming hostname as soon as a match is found, avoiding unnecessary DNS queries.
+- When `resolves_to` is configured, allowed target members are resolved before the incoming hostname so that CNAME name matching can short-circuit resolution of the incoming hostname as soon as a match is found, avoiding unnecessary DNS queries. The resolved members map is now threaded directly into the final `resolves_to` check, eliminating a redundant cache lookup per request.
+- `max_subdomain_depth_raw` is no longer included in JSON output. It is a Caddyfile-only intermediary and has no meaning in JSON config; previously it could silently override `max_subdomain_depth` if both were set.
 
 ### Removed
 - `max_certs_per_domain` configuration option and all associated approval state persistence. Certificate cap functionality is out of scope for this module.
-- `rate_limit` and `per_domain_rate_limit` configuration options and all associated in-memory sliding-window counters. Issuance rate limiting is now provided by [`caddy-issuer-rate-limit`](https://github.com/pberkel/caddy-issuer-rate-limit), which enforces limits after `SubjectTransformer` has run (on effective certificate subjects rather than raw hostnames).
+- `rate_limit` and `per_domain_rate_limit` configuration options and all associated in-memory sliding-window counters. Issuance rate limiting is now provided by [`caddy-tls-issuer-rate-limit`](https://github.com/pberkel/caddy-tls-issuer-rate-limit), which enforces limits after `SubjectTransformer` has run (on effective certificate subjects rather than raw hostnames).
 
 ---
 

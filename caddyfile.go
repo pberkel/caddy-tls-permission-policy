@@ -52,6 +52,9 @@ func (PermissionByPolicy) CaddyModule() caddy.ModuleInfo {
 // UnmarshalCaddyfile implements caddyfile.Unmarshaler.
 func (p *PermissionByPolicy) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 	parseBoolInto := func(dest *bool, key string, vals []string) error {
+		if len(vals) == 0 {
+			return d.Errf("no value supplied for %s", key)
+		}
 		if len(vals) > 1 {
 			return d.Errf("too many arguments supplied to %s", key)
 		}
