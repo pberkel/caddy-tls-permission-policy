@@ -26,7 +26,6 @@ import (
 	miekgdns "github.com/miekg/dns"
 
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -65,7 +64,7 @@ type resolvedTargetsCache struct {
 // resolve to completion.
 func (p *PermissionByPolicy) resolveAddrs(ctx context.Context, name string, earlyExit map[string]struct{}) (*resolvedChain, error) {
 	if addr, err := netip.ParseAddr(name); err == nil {
-		if c := p.logger.Check(zapcore.DebugLevel, "resolved literal IP address"); c != nil {
+		if c := p.debugCheck("resolved literal IP address"); c != nil {
 			c.Write(zap.String("name", name), zap.String("ip", addr.String()))
 		}
 		return &resolvedChain{addrs: []netip.Addr{addr}}, nil
@@ -85,7 +84,7 @@ func (p *PermissionByPolicy) resolveAddrs(ctx context.Context, name string, earl
 	for i, addr := range resolved {
 		resolved[i] = addr.Unmap()
 	}
-	if c := p.logger.Check(zapcore.DebugLevel, "resolved hostname addresses"); c != nil {
+	if c := p.debugCheck("resolved hostname addresses"); c != nil {
 		c.Write(zap.String("name", name), zap.Any("resolved_addrs", resolved))
 	}
 
@@ -189,7 +188,7 @@ func (p *PermissionByPolicy) resolveChainWithClient(ctx context.Context, name st
 	for addr := range resolved {
 		chain.addrs = append(chain.addrs, addr)
 	}
-	if c := p.logger.Check(zapcore.DebugLevel, "resolved hostname addresses"); c != nil {
+	if c := p.debugCheck("resolved hostname addresses"); c != nil {
 		c.Write(
 			zap.String("name", name),
 			zap.Any("resolved_addrs", chain.addrs),
@@ -208,7 +207,7 @@ func (p *PermissionByPolicy) resolveChainWithClient(ctx context.Context, name st
 // and a resolves_to target share a common intermediate CNAME (e.g. a CDN
 // hostname), the check passes even if their final IPs differ.
 func (p *PermissionByPolicy) checkResolvesTo(chain *resolvedChain, allowed map[string]struct{}) error {
-	if c := p.logger.Check(zapcore.DebugLevel, "evaluated resolves_to targets"); c != nil {
+	if c := p.debugCheck("evaluated resolves_to targets"); c != nil {
 		c.Write(
 			zap.Strings("resolved_names", chain.names),
 			zap.Any("resolved_addrs", chain.addrs),

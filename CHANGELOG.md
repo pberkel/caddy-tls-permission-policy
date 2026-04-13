@@ -5,7 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [v1.3.1] - 2026-04-13
+
+### Added
+- `debug` configuration option. When `true`, per-request policy evaluation details (hostname normalisation, subdomain depth, allow/deny regexp and subdomain checks, `resolves_to` matches, and final allow/deny outcome) are emitted at info level regardless of the global Caddy log level. When `false` (the default), the same details are only emitted when Caddy's global log level is set to debug.
 
 ---
 

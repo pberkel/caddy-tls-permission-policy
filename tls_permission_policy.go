@@ -59,6 +59,10 @@ type PermissionByPolicy struct {
 	PermitLocal bool `json:"permit_local"`
 	// Allow all names without applying hostname policy checks. Default: false.
 	PermitAll bool `json:"permit_all"`
+	// When true, per-request policy evaluation details are logged at info level
+	// regardless of the global Caddy log level. When false (the default), the
+	// same details are only emitted when Caddy's global log level is set to debug.
+	Debug bool `json:"debug,omitempty"`
 
 	logger            *zap.Logger                                                 `json:"-"`
 	dnsClient         *miekgdns.Client                                            `json:"-"`
@@ -70,11 +74,22 @@ type PermissionByPolicy struct {
 	resolvedTargets   *resolvedTargetsCache                                       `json:"-"`
 }
 
+// debugCheck returns a zap.CheckedEntry for a debug-level message. When the
+// Debug flag is enabled the entry is checked at info level so it is always
+// emitted regardless of the global Caddy log level. When Debug is false the
+// entry is only emitted when Caddy's global log level includes debug.
+func (p *PermissionByPolicy) debugCheck(msg string) *zapcore.CheckedEntry {
+	if p.Debug {
+		return p.logger.Check(zapcore.InfoLevel, msg)
+	}
+	return p.logger.Check(zapcore.DebugLevel, msg)
+}
+
 // CertificateAllowed evaluates the configured policy for a requested certificate name.
 func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string) error {
 	// This policy should never be enabled in production.
 	if p.PermitAll {
-		if c := p.logger.Check(zapcore.DebugLevel, "permit_all bypassed policy checks"); c != nil {
+		if c := p.debugCheck("permit_all bypassed policy checks"); c != nil {
 			c.Write(zap.String("name", name))
 		}
 		return nil
@@ -106,7 +121,7 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 	// Normalize name by remove trailing dot and lowercasing.
 	originalName := name
 	name = strings.ToLower(strings.TrimSuffix(name, "."))
-	if c := p.logger.Check(zapcore.DebugLevel, "evaluating hostname policy"); c != nil {
+	if c := p.debugCheck("evaluating hostname policy"); c != nil {
 		c.Write(zap.String("name", originalName), zap.String("normalized_name", name))
 	}
 	if name == "" {
@@ -168,7 +183,7 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 			if effectiveSubdomain != "" {
 				labels = strings.Count(effectiveSubdomain, ".") + 1
 			}
-			if c := p.logger.Check(zapcore.DebugLevel, "evaluated max_subdomain_depth policy"); c != nil {
+			if c := p.debugCheck("evaluated max_subdomain_depth policy"); c != nil {
 				c.Write(
 					zap.String("name", name),
 					zap.String("effective_domain", effectiveDomain),
@@ -185,7 +200,7 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 		// Deny names whose effective subdomain matches any configured deny_subdomain literal.
 		if len(p.denySubdomainSet) > 0 {
 			_, deniedSubdomain := p.denySubdomainSet[effectiveSubdomain]
-			if c := p.logger.Check(zapcore.DebugLevel, "evaluated deny_subdomain policy"); c != nil {
+			if c := p.debugCheck("evaluated deny_subdomain policy"); c != nil {
 				c.Write(
 					zap.String("name", name),
 					zap.String("effective_subdomain", effectiveSubdomain),
@@ -201,7 +216,7 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 		// Allow names whose effective subdomain matches at least one configured allow_subdomain literal.
 		if len(p.allowSubdomainSet) > 0 {
 			_, allowedSubdomain := p.allowSubdomainSet[effectiveSubdomain]
-			if c := p.logger.Check(zapcore.DebugLevel, "evaluated allow_subdomain policy"); c != nil {
+			if c := p.debugCheck("evaluated allow_subdomain policy"); c != nil {
 				c.Write(
 					zap.String("name", name),
 					zap.String("effective_subdomain", effectiveSubdomain),
@@ -224,7 +239,7 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 				break
 			}
 		}
-		if c := p.logger.Check(zapcore.DebugLevel, "evaluated deny_regexp policy"); c != nil {
+		if c := p.debugCheck("evaluated deny_regexp policy"); c != nil {
 			c.Write(
 				zap.String("name", name),
 				zap.Int("regexp_count", len(p.denyRegexp)),
@@ -246,7 +261,7 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 				break
 			}
 		}
-		if c := p.logger.Check(zapcore.DebugLevel, "evaluated allow_regexp policy"); c != nil {
+		if c := p.debugCheck("evaluated allow_regexp policy"); c != nil {
 			c.Write(
 				zap.String("name", name),
 				zap.Int("regexp_count", len(p.allowRegexp)),
@@ -267,7 +282,7 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 		}
 	}
 
-	if c := p.logger.Check(zapcore.DebugLevel, "certificate request allowed by policy"); c != nil {
+	if c := p.debugCheck("certificate request allowed by policy"); c != nil {
 		c.Write(zap.String("name", name))
 	}
 

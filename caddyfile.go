@@ -112,6 +112,10 @@ func (p *PermissionByPolicy) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				if err := parseBoolInto(&p.PermitAll, configKey, configVal); err != nil {
 					return err
 				}
+			case "debug":
+				if err := parseBoolInto(&p.Debug, configKey, configVal); err != nil {
+					return err
+				}
 			default:
 				return d.Errf("unrecognized configuration parameter: %s", configKey)
 			}
@@ -232,6 +236,7 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 			zap.Bool("permit_ip", p.PermitIP),
 			zap.Bool("permit_local", p.PermitLocal),
 			zap.Bool("permit_all", p.PermitAll),
+			zap.Bool("debug", p.Debug),
 		)
 	}
 

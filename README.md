@@ -32,6 +32,7 @@ Configure the module in an on-demand TLS permission block. The example below dem
 			permit_ip false
 			permit_local false
 			permit_all false
+			debug false
 		}
 	}
 }
@@ -105,6 +106,7 @@ The same configuration can be represented in JSON. This is a config snippet rath
 | `permit_ip` | `bool` | `false` | Allow certificates for direct IP address names. When enabled, IP names bypass regexp and subdomain checks, and are evaluated only against `permit_local` and `resolves_to`. |
 | `permit_local` | `bool` | `false` | Allow names resolving to local, private, loopback, link-local, or unspecified addresses. When false (the default), DNS resolution is performed on every request to verify the hostname does not resolve locally — even for regexp/subdomain-only policies. |
 | `permit_all` | `bool` | `false` | Bypass all policy checks and allow every certificate request. Should never be used in production. |
+| `debug` | `bool` | `false` | Emit per-request policy evaluation details at info level regardless of the global Caddy log level. When false, the same details are only emitted when Caddy's global log level is set to debug. |
 
 > **Caddyfile vs JSON for numeric fields:** When `max_subdomain_depth` is set via Caddyfile, its raw string value (which may contain placeholders) is stored in the `max_subdomain_depth_raw` JSON field and resolved at provisioning time. When configuring directly via JSON, use the concrete integer field instead.
 
