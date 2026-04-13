@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.3.2] - 2026-04-14
+
+### Fixed
+- Hostname resolution failures and `resolves_to` check failures are now logged at the configured debug level (info when `debug: true`, debug otherwise). Previously these denials were silent — no log entry was emitted, making it impossible to distinguish a policy denial from a network or DNS error when diagnosing failed certificate requests.
+- Added `dns_timeout` configuration option to control the per-query DNS timeout when `resolvers` is configured. Accepts a Go duration string (e.g. `10s`, `500ms`). Defaults to `5s`. Caddy placeholders are supported.
+
+---
+
 ## [v1.3.1] - 2026-04-13
 
 ### Added

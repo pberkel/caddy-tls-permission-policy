@@ -29,6 +29,7 @@ Configure the module in an on-demand TLS permission block. The example below dem
 			max_subdomain_depth 1
 			resolvers 8.8.8.8
 			resolves_to my-caddy-server.example.net
+			dns_timeout 5s
 			permit_ip false
 			permit_local false
 			permit_all false
@@ -85,7 +86,8 @@ The same configuration can be represented in JSON. This is a config snippet rath
 						],
 						"resolves_to": [
 							"my-caddy-server.example.net"
-						]
+						],
+						"dns_timeout": 5000000000
 					}
 				}
 			}
@@ -102,13 +104,14 @@ The same configuration can be represented in JSON. This is a config snippet rath
 | `deny_subdomain` | `label...` | — | Deny hostnames whose subdomain portion exactly matches one of these literals. Use `""` to match the domain apex. Values are normalized to lowercase at provisioning time. |
 | `resolves_to` | `target...` | — | Allow only hostnames whose DNS resolution chain shares at least one element — an intermediate CNAME name or final IP address — with the chains produced by resolving these targets (hostnames or literal IPs). When `resolvers` is configured, intermediate CNAME names are collected and matched; without `resolvers` the system resolver is used and only IP addresses are compared. Resolved target chains are cached in memory for 5 minutes. |
 | `resolvers` | `HOST\|HOST:PORT...` | system | Custom DNS resolvers used for hostname resolution instead of the system resolver. Port defaults to `53` when omitted. |
+| `dns_timeout` | `duration` | `5s` | Timeout for each DNS query when `resolvers` is configured. Accepts a Go duration string (e.g. `10s`, `500ms`). Increase this when using a recursive resolver (e.g. Unbound) where cold lookups may involve multiple upstream queries. Supports Caddy [placeholders](https://caddyserver.com/docs/conventions#placeholders). |
 | `max_subdomain_depth` | `integer` | `-1` (no limit) | Maximum subdomain label depth to the left of the registrable domain. `example.com` = 0, `www.example.com` = 1, `api.v2.example.com` = 2. Note: many ACME providers enforce an internal limit of 10 labels. Supports Caddy [placeholders](https://caddyserver.com/docs/conventions#placeholders). |
 | `permit_ip` | `bool` | `false` | Allow certificates for direct IP address names. When enabled, IP names bypass regexp and subdomain checks, and are evaluated only against `permit_local` and `resolves_to`. |
 | `permit_local` | `bool` | `false` | Allow names resolving to local, private, loopback, link-local, or unspecified addresses. When false (the default), DNS resolution is performed on every request to verify the hostname does not resolve locally — even for regexp/subdomain-only policies. |
 | `permit_all` | `bool` | `false` | Bypass all policy checks and allow every certificate request. Should never be used in production. |
 | `debug` | `bool` | `false` | Emit per-request policy evaluation details at info level regardless of the global Caddy log level. When false, the same details are only emitted when Caddy's global log level is set to debug. |
 
-> **Caddyfile vs JSON for numeric fields:** When `max_subdomain_depth` is set via Caddyfile, its raw string value (which may contain placeholders) is stored in the `max_subdomain_depth_raw` JSON field and resolved at provisioning time. When configuring directly via JSON, use the concrete integer field instead.
+> **Caddyfile vs JSON for duration/numeric fields:** `dns_timeout` and `max_subdomain_depth` support Caddy placeholders when set via Caddyfile. The raw string values are Caddyfile-only intermediaries and are not included in JSON output. When configuring directly via JSON, use the concrete fields instead: `dns_timeout` as nanoseconds (e.g. `5000000000` for 5s) and `max_subdomain_depth` as an integer.
 
 ## Important Behavior Notes
 

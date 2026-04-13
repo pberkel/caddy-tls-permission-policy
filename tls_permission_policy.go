@@ -20,6 +20,7 @@ import (
 	"net/netip"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/caddyserver/caddy/v2/modules/caddytls"
 	miekgdns "github.com/miekg/dns"
@@ -63,6 +64,11 @@ type PermissionByPolicy struct {
 	// regardless of the global Caddy log level. When false (the default), the
 	// same details are only emitted when Caddy's global log level is set to debug.
 	Debug bool `json:"debug,omitempty"`
+	// Timeout for DNS queries when resolvers are configured. Defaults to 5s.
+	DNSTimeout time.Duration `json:"dns_timeout,omitempty"`
+	// Raw string value for dns_timeout; may contain Caddy placeholders resolved at provisioning time.
+	// When non-empty, takes precedence over DNSTimeout. Caddyfile-only; excluded from JSON serialization.
+	DNSTimeoutRaw string `json:"-"`
 
 	logger            *zap.Logger                                                 `json:"-"`
 	dnsClient         *miekgdns.Client                                            `json:"-"`
@@ -151,6 +157,9 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 		var err error
 		resolvedName, err = p.resolveAddrs(ctx, name, earlyExit)
 		if err != nil {
+			if c := p.debugCheck("hostname resolution failed"); c != nil {
+				c.Write(zap.String("name", name), zap.Error(err))
+			}
 			return fmt.Errorf("%w: resolving name %q: %w", caddytls.ErrPermissionDenied, name, err)
 		}
 
@@ -278,6 +287,9 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 	// to this server) to ensure ACME HTTP-01 or TLS-ALPN-01 challenge will be successful.
 	if len(p.ResolvesTo) > 0 {
 		if err := p.checkResolvesTo(resolvedName, earlyExit); err != nil {
+			if c := p.debugCheck("resolves_to check failed"); c != nil {
+				c.Write(zap.String("name", name), zap.Error(err))
+			}
 			return err
 		}
 	}

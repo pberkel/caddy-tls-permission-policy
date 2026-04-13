@@ -116,6 +116,11 @@ func (p *PermissionByPolicy) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				if err := parseBoolInto(&p.Debug, configKey, configVal); err != nil {
 					return err
 				}
+			case "dns_timeout":
+				if len(configVal) > 1 {
+					return d.Err("too many arguments supplied to dns_timeout")
+				}
+				p.DNSTimeoutRaw = configVal[0]
 			default:
 				return d.Errf("unrecognized configuration parameter: %s", configKey)
 			}
@@ -144,6 +149,19 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 			return fmt.Errorf("invalid integer value for max_subdomain_depth: %s", raw)
 		}
 		p.MaxSubdomainDepth = val
+	}
+
+	// Replace placeholders in dns_timeout raw value and parse into the concrete field.
+	if p.DNSTimeoutRaw != "" {
+		raw := replacer.ReplaceAll(p.DNSTimeoutRaw, "")
+		val, err := time.ParseDuration(raw)
+		if err != nil {
+			return fmt.Errorf("invalid duration value for dns_timeout: %s", raw)
+		}
+		if val <= 0 {
+			return fmt.Errorf("dns_timeout must be greater than zero, got %s", raw)
+		}
+		p.DNSTimeout = val
 	}
 
 	// Validate integer settings: -1 means "no limit"; values below -1 are not valid.
@@ -221,7 +239,11 @@ func (p *PermissionByPolicy) Provision(ctx caddy.Context) error {
 		p.Resolvers[i] = value
 	}
 	if len(p.Resolvers) > 0 {
-		p.dnsClient = &miekgdns.Client{Timeout: customDNSTimeout}
+		dnsTimeout := customDNSTimeout
+		if p.DNSTimeout > 0 {
+			dnsTimeout = p.DNSTimeout
+		}
+		p.dnsClient = &miekgdns.Client{Timeout: dnsTimeout}
 	}
 
 	if c := p.logger.Check(zapcore.InfoLevel, "provisioned tls.permission.policy"); c != nil {
