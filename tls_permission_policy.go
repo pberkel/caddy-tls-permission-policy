@@ -119,8 +119,10 @@ func (p *PermissionByPolicy) CertificateAllowed(ctx context.Context, name string
 			}
 		}
 		// Name is an IP address and specifically allowed by configured policy.
-		// Certificates issuance will only succeed if Caddy is configured to
-		// generate self-signed certificates using the `tls internal` option.
+		// Let's Encrypt began issuing certificates for public IP addresses in January 2026,
+		// so permit_ip=true can result in real publicly-trusted certificates being issued.
+		// It is strongly recommended to pair permit_ip with resolves_to to restrict issuance
+		// to IP addresses that are known to belong to this server.
 		return nil
 	}
 
