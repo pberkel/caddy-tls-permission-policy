@@ -50,8 +50,10 @@ type PermissionByPolicy struct {
 	// The maximum subdomain depth measured to the left of the effective domain. The effective domain itself has depth 0. Default -1 no limit.
 	MaxSubdomainDepth int `json:"max_subdomain_depth"`
 	// Raw string value for max_subdomain_depth; may contain Caddy placeholders resolved at provisioning time.
-	// When non-empty, takes precedence over MaxSubdomainDepth. Caddyfile-only; excluded from JSON serialization.
-	MaxSubdomainDepthRaw string `json:"-"`
+	// When non-empty, takes precedence over MaxSubdomainDepth. Caddyfile-only, but must survive JSON
+	// marshaling: caddy run/adapt round-trips Caddyfile-derived config through JSON before Provision
+	// runs, so a json:"-" tag here would silently discard the raw value and Provision would never see it.
+	MaxSubdomainDepthRaw string `json:"max_subdomain_depth_raw,omitempty"`
 	// Allow certificates for IP address hosts. When true, IP address names bypass all other
 	// policy checks (regexp patterns, subdomain rules) and are evaluated only against the
 	// permit_local and resolves_to policies. Default: false.
@@ -67,8 +69,10 @@ type PermissionByPolicy struct {
 	// Timeout for DNS queries when resolvers are configured. Defaults to 5s.
 	DNSTimeout time.Duration `json:"dns_timeout,omitempty"`
 	// Raw string value for dns_timeout; may contain Caddy placeholders resolved at provisioning time.
-	// When non-empty, takes precedence over DNSTimeout. Caddyfile-only; excluded from JSON serialization.
-	DNSTimeoutRaw string `json:"-"`
+	// When non-empty, takes precedence over DNSTimeout. Caddyfile-only, but must survive JSON
+	// marshaling: caddy run/adapt round-trips Caddyfile-derived config through JSON before Provision
+	// runs, so a json:"-" tag here would silently discard the raw value and Provision would never see it.
+	DNSTimeoutRaw string `json:"dns_timeout_raw,omitempty"`
 
 	logger            *zap.Logger                                                 `json:"-"`
 	dnsClient         *miekgdns.Client                                            `json:"-"`

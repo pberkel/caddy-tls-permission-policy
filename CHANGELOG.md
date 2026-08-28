@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.3.3] - 2026-08-28
+
+### Fixed
+- `max_subdomain_depth` and `dns_timeout` set via Caddyfile (including via placeholders like `{$MAX_SUBDOMAIN_DEPTH}` or `{env.VAR}`) were silently ignored — the effective values stayed stuck at their zero-value/default (`max_subdomain_depth` at `-1`, i.e. no limit) regardless of what was configured. Root cause: `MaxSubdomainDepthRaw` and `DNSTimeoutRaw` were tagged `json:"-"`, but `caddy run`/`caddy adapt` round-trip Caddyfile-derived config through JSON marshal/unmarshal before `Provision` runs, and that round trip silently dropped both raw values before `Provision` ever got a chance to resolve them. Fixed by giving both fields real (but still Caddyfile-only, `omitempty`) JSON keys so they survive the round trip.
+
 ## [v1.3.2] - 2026-04-14
 
 ### Fixed
