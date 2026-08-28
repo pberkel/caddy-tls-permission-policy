@@ -15,9 +15,11 @@ package tlspermissionpolicy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/netip"
 	"testing"
+	"time"
 
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
@@ -406,6 +408,79 @@ func TestProvisionReplacesMaxSubdomainDepthPlaceholder(t *testing.T) {
 	}
 	if policy.MaxSubdomainDepth != 2 {
 		t.Errorf("expected MaxSubdomainDepth=2, got %d", policy.MaxSubdomainDepth)
+	}
+}
+
+// TestMaxSubdomainDepthSurvivesJSONRoundTrip reproduces the real deployment
+// path: `caddy run --adapter caddyfile` adapts the Caddyfile to JSON, then
+// loads a fresh module instance from that JSON before calling Provision.
+// A json:"-" tag on MaxSubdomainDepthRaw would silently drop the raw value
+// during that round trip, leaving MaxSubdomainDepth stuck at its -1 default
+// regardless of what was configured. This test fails without the fix.
+func TestMaxSubdomainDepthSurvivesJSONRoundTrip(t *testing.T) {
+	policy := &PermissionByPolicy{}
+	dispenser := caddyfile.NewTestDispenser(`
+	permission {
+		max_subdomain_depth 6
+	}
+	`)
+	if err := policy.UnmarshalCaddyfile(dispenser); err != nil {
+		t.Fatalf("unexpected unmarshal error: %v", err)
+	}
+
+	data, err := json.Marshal(policy)
+	if err != nil {
+		t.Fatalf("unexpected marshal error: %v", err)
+	}
+
+	roundTripped := &PermissionByPolicy{}
+	if err := json.Unmarshal(data, roundTripped); err != nil {
+		t.Fatalf("unexpected unmarshal error: %v", err)
+	}
+
+	ctx, cancel := newProvisionContext(t)
+	defer cancel()
+	if err := roundTripped.Provision(ctx); err != nil {
+		t.Fatalf("expected provision success, got %v", err)
+	}
+
+	if roundTripped.MaxSubdomainDepth != 6 {
+		t.Errorf("expected MaxSubdomainDepth=6 after JSON round-trip, got %d", roundTripped.MaxSubdomainDepth)
+	}
+}
+
+// TestDNSTimeoutSurvivesJSONRoundTrip is the dns_timeout analogue of
+// TestMaxSubdomainDepthSurvivesJSONRoundTrip; DNSTimeoutRaw has the identical
+// Raw-field pattern and was affected by the same bug.
+func TestDNSTimeoutSurvivesJSONRoundTrip(t *testing.T) {
+	policy := &PermissionByPolicy{}
+	dispenser := caddyfile.NewTestDispenser(`
+	permission {
+		dns_timeout 10s
+	}
+	`)
+	if err := policy.UnmarshalCaddyfile(dispenser); err != nil {
+		t.Fatalf("unexpected unmarshal error: %v", err)
+	}
+
+	data, err := json.Marshal(policy)
+	if err != nil {
+		t.Fatalf("unexpected marshal error: %v", err)
+	}
+
+	roundTripped := &PermissionByPolicy{}
+	if err := json.Unmarshal(data, roundTripped); err != nil {
+		t.Fatalf("unexpected unmarshal error: %v", err)
+	}
+
+	ctx, cancel := newProvisionContext(t)
+	defer cancel()
+	if err := roundTripped.Provision(ctx); err != nil {
+		t.Fatalf("expected provision success, got %v", err)
+	}
+
+	if roundTripped.DNSTimeout != 10*time.Second {
+		t.Errorf("expected DNSTimeout=10s after JSON round-trip, got %s", roundTripped.DNSTimeout)
 	}
 }
 
